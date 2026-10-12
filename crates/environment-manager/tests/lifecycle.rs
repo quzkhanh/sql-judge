@@ -286,3 +286,19 @@ fn provisioning_environment_can_be_marked_ready_only_after_setup() {
         EnvironmentState::Ready
     );
 }
+
+#[test]
+fn failed_lifecycle_cleanup_marks_environment_error() {
+    let mut ledger = EnvironmentLedger::default();
+    let mut record = record("env-a", "sj_a");
+    record.state = EnvironmentState::Rebuilding;
+    ledger
+        .create(record)
+        .expect("create rebuilding environment");
+
+    ledger.mark_error("env-a").expect("mark lifecycle error");
+    assert_eq!(
+        ledger.inspect("env-a").expect("error environment").state,
+        EnvironmentState::Error
+    );
+}

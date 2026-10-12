@@ -206,6 +206,23 @@ impl EnvironmentLedger {
         Ok(())
     }
 
+    pub fn mark_error(&mut self, env_id: &str) -> Result<(), LifecycleError> {
+        let record = self
+            .records
+            .get_mut(env_id)
+            .ok_or(LifecycleError::NotFound)?;
+        if !matches!(
+            record.state,
+            EnvironmentState::Provisioning
+                | EnvironmentState::Rebuilding
+                | EnvironmentState::Deleting
+        ) {
+            return Err(LifecycleError::Ownership(OwnershipError::InvalidState));
+        }
+        record.state = EnvironmentState::Error;
+        Ok(())
+    }
+
     pub fn begin_delete(
         &mut self,
         env_id: &str,
