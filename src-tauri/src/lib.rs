@@ -1,4 +1,4 @@
-use app_storage::EnvironmentStore;
+use app_storage::{EnvironmentStore, HistoryStore, SubmissionRecord, TestRecord};
 use environment_manager::{
     DestructiveAction, EnvironmentLedger, EnvironmentMode, EnvironmentRecord, EnvironmentState,
 };
@@ -7,6 +7,7 @@ use judge_postgres::{
     JudgeCase, ManagedEnvironment, ManagedPostgresRuntime, PostgresSession, judge_submission,
 };
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
@@ -59,6 +60,7 @@ const EMPTY_FIXTURE_SQL: &str =
 
 struct ManagedEnvironmentState {
     store: EnvironmentStore,
+    history: HistoryStore,
     ledger: EnvironmentLedger,
     runtime_root: PathBuf,
     runtime_instance_id: String,
@@ -120,6 +122,8 @@ struct ManagedEnvironmentSummary {
 fn load_environment_state(path: &Path) -> Result<ManagedEnvironmentState, String> {
     let mut store = EnvironmentStore::open(path)
         .map_err(|_| "Managed environment state could not be opened.".to_owned())?;
+    let history = HistoryStore::open(path)
+        .map_err(|_| "Submission history could not be opened.".to_owned())?;
     let runtime_instance_id = store
         .get_or_create_runtime_instance_id()
         .map_err(|_| "Managed runtime identity could not be persisted.".to_owned())?;
@@ -148,6 +152,7 @@ fn load_environment_state(path: &Path) -> Result<ManagedEnvironmentState, String
         .join("postgres-runtime");
     Ok(ManagedEnvironmentState {
         store,
+        history,
         ledger,
         runtime_root,
         runtime_instance_id,
@@ -609,6 +614,36 @@ fn judge_cases(submit: bool) -> Vec<JudgeCase<'static>> {
         .collect()
 }
 
+fn embedded_pack_hash() -> String {
+    let mut digest = Sha256::new();
+    digest.update(SCHEMA_SQL.as_bytes());
+    digest.update(REFERENCE_SQL.as_bytes());
+    digest.update(BASIC_FIXTURE_SQL.as_bytes());
+    digest.update(EDGE_FIXTURE_SQL.as_bytes());
+    digest.update(EMPTY_FIXTURE_SQL.as_bytes());
+    let bytes = digest.finalize();
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn submission_id() -> String {
+    format!(
+        "submission-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos())
+    )
+}
+
+fn created_at() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or_else(
+            |_| "0".to_owned(),
+            |duration| duration.as_secs().to_string(),
+        )
+}
+
 fn judge_request(
     request: JudgeRunRequest,
     state: &Mutex<ManagedEnvironmentState>,
@@ -679,12 +714,45 @@ fn judge_request(
         &judge_cases(expected_mode == "submit"),
         &request.sql,
     );
+    let duration_ms = started.elapsed().as_millis() as u64;
+    let verdict = verdict_name(report.verdict).to_owned();
+    if expected_mode == "submit" {
+        let tests = report
+            .tests
+            .iter()
+            .map(|test| TestRecord {
+                test_id: test.id.clone(),
+                verdict: verdict_name(test.verdict).to_owned(),
+                elapsed_ms: duration_ms,
+            })
+            .collect::<Vec<_>>();
+        let submission = SubmissionRecord {
+            submission_id: submission_id(),
+            pack_id: "hr-sql-101".to_owned(),
+            pack_version: "1.0.0".to_owned(),
+            pack_hash: embedded_pack_hash(),
+            engine_version: "postgresql-managed".to_owned(),
+            policy_version: "policy-v1".to_owned(),
+            verdict: verdict.clone(),
+            created_at: created_at(),
+        };
+        if state.history.save_submission(&submission, &tests).is_err() {
+            return JudgeRunResult {
+                status: "error".to_owned(),
+                verdict: Some("JudgeError".to_owned()),
+                columns: Vec::new(),
+                rows: Vec::new(),
+                duration_ms,
+                message: "Submission completed but history could not be saved.".to_owned(),
+            };
+        }
+    }
     JudgeRunResult {
         status: "completed".to_owned(),
-        verdict: Some(verdict_name(report.verdict).to_owned()),
+        verdict: Some(verdict),
         columns: Vec::new(),
         rows: Vec::new(),
-        duration_ms: started.elapsed().as_millis() as u64,
+        duration_ms,
         message: format!("{} test case(s) evaluated.", report.tests.len()),
     }
 }
@@ -947,6 +1015,15 @@ mod tests {
         );
         assert_eq!(submit.status, "completed");
         assert_eq!(submit.verdict.as_deref(), Some("WrongAnswer"));
+        let state_guard = state.lock().expect("lock history state");
+        let history = state_guard
+            .history
+            .list_submissions()
+            .expect("list submission history");
+        assert_eq!(history.len(), 1);
+        assert_eq!(history[0].pack_id, "hr-sql-101");
+        assert!(!history[0].pack_hash.is_empty());
+        drop(state_guard);
         drop(state);
         let _ = std::fs::remove_dir_all(root);
     }
