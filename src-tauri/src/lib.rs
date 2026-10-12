@@ -4,12 +4,15 @@ use environment_manager::{
 };
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, Verdict};
 use judge_postgres::{
-    JudgeCase, ManagedEnvironment, ManagedPostgresRuntime, PostgresSession, judge_submission,
+    JudgeCase, ManagedEnvironment, ManagedPostgresRuntime, PostgresSession,
+    judge_submission_with_cancel,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, State};
@@ -27,6 +30,59 @@ struct JudgeRunRequest {
     problem_id: String,
     sql: String,
     mode: String,
+    #[serde(default)]
+    request_id: Option<String>,
+}
+
+static CANCELLATIONS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+
+fn cancellation_registry() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+    CANCELLATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+struct CancellationRegistration {
+    id: Option<String>,
+    token: Arc<AtomicBool>,
+}
+
+impl Drop for CancellationRegistration {
+    fn drop(&mut self) {
+        if let Some(id) = &self.id
+            && let Ok(mut registry) = cancellation_registry().lock()
+        {
+            let owns_entry = registry
+                .get(id)
+                .is_some_and(|token| Arc::ptr_eq(token, &self.token));
+            if owns_entry {
+                registry.remove(id);
+            }
+        }
+    }
+}
+
+fn register_cancellation(request_id: Option<&str>) -> CancellationRegistration {
+    let token = Arc::new(AtomicBool::new(false));
+    let id = request_id
+        .map(str::trim)
+        .filter(|id| !id.is_empty())
+        .map(str::to_owned);
+    if let Some(id) = &id
+        && let Ok(mut registry) = cancellation_registry().lock()
+    {
+        registry.insert(id.clone(), Arc::clone(&token));
+    }
+    CancellationRegistration { id, token }
+}
+
+fn cancel_judge_value(request_id: &str) -> bool {
+    cancellation_registry()
+        .lock()
+        .ok()
+        .and_then(|registry| registry.get(request_id).cloned())
+        .is_some_and(|token| {
+            token.store(true, Ordering::Release);
+            true
+        })
 }
 
 #[derive(Debug, Serialize)]
@@ -671,6 +727,8 @@ fn judge_request(
     if request.problem_id != SUPPORTED_PROBLEM_ID || request.mode != expected_mode {
         return policy_error("The requested problem or judge mode is not available.");
     }
+    let cancellation = register_cancellation(request.request_id.as_deref());
+    let cancellation_token = Arc::clone(&cancellation.token);
     let started = Instant::now();
     let mut state = match state.lock() {
         Ok(state) => state,
@@ -721,11 +779,12 @@ fn judge_request(
             };
         }
     };
-    let report = judge_submission(
+    let report = judge_submission_with_cancel(
         &mut session,
         "sqljudge_runner",
         &judge_cases(expected_mode == "submit"),
         &request.sql,
+        move || cancellation_token.load(Ordering::Acquire),
     );
     let duration_ms = started.elapsed().as_millis() as u64;
     let verdict = verdict_name(report.verdict).to_owned();
@@ -784,6 +843,11 @@ fn submit_solution(
     state: State<'_, Mutex<ManagedEnvironmentState>>,
 ) -> JudgeRunResult {
     judge_request(request, state.inner(), "submit")
+}
+
+#[tauri::command]
+fn cancel_judge(request_id: String) -> bool {
+    cancel_judge_value(&request_id)
 }
 
 #[tauri::command]
@@ -959,6 +1023,7 @@ pub fn run() {
             greet,
             run_sample,
             submit_solution,
+            cancel_judge,
             list_managed_environments,
             inspect_managed_environment,
             create_managed_environment,
@@ -983,13 +1048,23 @@ pub fn run() {
 mod tests {
     use super::{
         CloneEnvironmentRequest, CreateEnvironmentRequest, DeleteEnvironmentRequest,
-        JudgeRunRequest, ResetEnvironmentRequest, SUPPORTED_PROBLEM_ID,
+        JudgeRunRequest, ResetEnvironmentRequest, SUPPORTED_PROBLEM_ID, cancel_judge_value,
         clone_managed_environment_value, create_managed_environment_value,
         delete_managed_environment_value, ensure_managed_runtime, judge_request,
         load_environment_state, managed_environment_summary, managed_runtime_status_value,
-        reset_managed_environment_value, unavailable_judge, verdict_name,
+        register_cancellation, reset_managed_environment_value, unavailable_judge, verdict_name,
     };
     use std::sync::Mutex;
+    use std::sync::atomic::Ordering;
+
+    #[test]
+    fn native_judge_cancellation_registry_is_scoped_to_request_id() {
+        let registration = register_cancellation(Some("request-1"));
+        assert!(cancel_judge_value("request-1"));
+        assert!(registration.token.load(Ordering::Acquire));
+        drop(registration);
+        assert!(!cancel_judge_value("request-1"));
+    }
 
     #[test]
     fn native_bridge_fails_closed_when_runtime_is_missing() {
@@ -997,6 +1072,7 @@ mod tests {
             problem_id: "above-average".to_owned(),
             sql: "SELECT 1".to_owned(),
             mode: "run".to_owned(),
+            request_id: None,
         });
 
         assert_eq!(result.status, "unavailable");
@@ -1039,6 +1115,7 @@ mod tests {
                 problem_id: SUPPORTED_PROBLEM_ID.to_owned(),
                 sql: "SELECT e.id AS employee_id, e.name AS employee_name FROM employees AS e WHERE e.salary > (SELECT AVG(peer.salary) FROM employees AS peer WHERE peer.department_id = e.department_id)".to_owned(),
                 mode: "run".to_owned(),
+                request_id: None,
             },
             &state,
             "run",
@@ -1051,6 +1128,7 @@ mod tests {
                 problem_id: SUPPORTED_PROBLEM_ID.to_owned(),
                 sql: "SELECT 1".to_owned(),
                 mode: "submit".to_owned(),
+                request_id: None,
             },
             &state,
             "submit",
@@ -1203,6 +1281,7 @@ mod tests {
             problem_id: "above-average".to_owned(),
             sql: "x".repeat(65_537),
             mode: "submit".to_owned(),
+            request_id: None,
         });
 
         assert_eq!(result.status, "error");

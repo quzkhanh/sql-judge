@@ -15,6 +15,7 @@ export type JudgeRunRequest = {
   problemId: string
   sql: string
   mode: "run" | "submit"
+  requestId?: string
 }
 
 export type JudgeRunResult = {
@@ -100,6 +101,14 @@ export async function runJudge(
     request.mode === "run" ? "run_sample" : "submit_solution",
     request
   )
+}
+
+export async function cancelJudge(requestId: string): Promise<boolean> {
+  if (!isTauri()) {
+    return false
+  }
+
+  return trackedInvoke<boolean>("cancel_judge", { requestId })
 }
 
 export async function listManagedEnvironments(): Promise<

@@ -8,6 +8,7 @@ import {
   Send,
   Table2,
   Trash2,
+  XCircle,
 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -24,6 +25,7 @@ import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import {
   getManagedRuntimeStatus,
+  cancelJudge,
   createManagedEnvironment,
   deleteManagedEnvironment,
   listManagedEnvironments,
@@ -58,6 +60,7 @@ export function LearningWorkspace() {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [result, setResult] = useState<JudgeRunResult | null>(null)
   const [busy, setBusy] = useState(false)
+  const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
   const [runtimeStatus, setRuntimeStatus] =
     useState<ManagedRuntimeStatus | null>(null)
   const [runtimeBusy, setRuntimeBusy] = useState(false)
@@ -143,13 +146,16 @@ export function LearningWorkspace() {
   const draft = drafts[selectedProblem.id] ?? selectedProblem.starterSql
 
   async function run(mode: "run" | "submit") {
+    const requestId = crypto.randomUUID()
     setBusy(true)
+    setActiveRequestId(requestId)
     setResult(null)
     try {
       const nextResult = await runJudge({
         problemId: selectedProblem.id,
         sql: draft,
         mode,
+        requestId,
       })
       setResult(nextResult)
       if (mode === "submit") {
@@ -164,6 +170,13 @@ export function LearningWorkspace() {
       })
     } finally {
       setBusy(false)
+      setActiveRequestId(null)
+    }
+  }
+
+  async function cancelActiveJudge() {
+    if (activeRequestId) {
+      await cancelJudge(activeRequestId).catch(() => undefined)
     }
   }
 
@@ -416,6 +429,16 @@ export function LearningWorkspace() {
                   <Send />
                   Submit
                 </Button>
+                {busy && activeRequestId ? (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => void cancelActiveJudge()}
+                  >
+                    <XCircle />
+                    Cancel
+                  </Button>
+                ) : null}
               </div>
             </div>
           </CardHeader>
