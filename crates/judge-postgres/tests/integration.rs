@@ -347,6 +347,39 @@ fn managed_namespace_schema_setup_isolated_between_environments() {
 }
 
 #[test]
+fn managed_namespace_drop_requires_owned_marker() {
+    let server = TestServer::start();
+    let mut admin =
+        PostgresSession::connect(&server.admin_connection_string()).expect("connect admin");
+    let environment = ManagedEnvironment::new("env-a", "instance-a", "sj_env_a", "nonce-a")
+        .expect("valid managed environment");
+    admin
+        .provision_managed_namespace_with_schema(
+            &environment,
+            "sqljudge_runner",
+            "CREATE TABLE employees (id integer);",
+        )
+        .expect("provision namespace");
+
+    let forged = ManagedEnvironment::new("env-a", "instance-a", "sj_env_a", "forged")
+        .expect("valid forged shape");
+    assert_eq!(
+        admin.drop_managed_namespace(&forged),
+        Err(QueryExecutionError::OwnershipVerificationFailed)
+    );
+    admin
+        .drop_managed_namespace(&environment)
+        .expect("drop owned namespace");
+    assert_eq!(
+        admin.execute(
+            "SELECT id FROM \"sj_env_a\".employees",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        ),
+        Err(QueryExecutionError::RuntimeError)
+    );
+}
+
+#[test]
 fn fixture_setup_cannot_write_to_public_schema_with_admin_session() {
     let server = TestServer::start();
     let mut admin =

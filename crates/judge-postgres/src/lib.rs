@@ -454,6 +454,64 @@ impl PostgresSession {
             setup
         }
     }
+
+    pub fn drop_managed_namespace(
+        &mut self,
+        environment: &ManagedEnvironment,
+    ) -> Result<(), QueryExecutionError> {
+        let schema = quote_identifier(&environment.namespace);
+        let marker = format!("{schema}.\"__sql_judge_ownership\"");
+        let mut transaction = self
+            .client
+            .transaction()
+            .map_err(|_| QueryExecutionError::RuntimeError)?;
+        let marker_exists = transaction
+            .query_one(
+                "SELECT EXISTS (
+                     SELECT 1 FROM pg_catalog.pg_namespace n
+                     JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid
+                     WHERE n.nspname = $1 AND c.relname = $2
+                       AND c.relkind IN ('r', 'p')
+                 )",
+                &[&environment.namespace, &"__sql_judge_ownership"],
+            )
+            .map_err(map_database_error)?
+            .get::<_, bool>(0);
+        if !marker_exists {
+            let _ = transaction.rollback();
+            return Err(QueryExecutionError::OwnershipVerificationFailed);
+        }
+        let owned_marker = transaction
+            .query_opt(
+                &format!(
+                    "SELECT m.environment_id, m.instance_id, m.ownership_nonce,
+                            n.nspowner = u.usesysid AND c.relowner = u.usesysid
+                     FROM {marker} m
+                     JOIN pg_catalog.pg_namespace n ON n.nspname = $1
+                     JOIN pg_catalog.pg_class c
+                       ON c.relnamespace = n.oid AND c.relname = $2
+                     JOIN pg_catalog.pg_user u ON u.usename = current_user"
+                ),
+                &[&environment.namespace, &"__sql_judge_ownership"],
+            )
+            .map_err(map_database_error)?
+            .is_some_and(|row| {
+                row.get::<_, String>(0) == environment.environment_id
+                    && row.get::<_, String>(1) == environment.instance_id
+                    && row.get::<_, String>(2) == environment.ownership_nonce
+                    && row.get::<_, bool>(3)
+            });
+        if !owned_marker {
+            let _ = transaction.rollback();
+            return Err(QueryExecutionError::OwnershipVerificationFailed);
+        }
+        transaction
+            .batch_execute(&format!("DROP SCHEMA {schema} CASCADE"))
+            .map_err(map_database_error)?;
+        transaction
+            .commit()
+            .map_err(|_| QueryExecutionError::RuntimeError)
+    }
 }
 
 fn is_safe_role_name(role: &str) -> bool {
