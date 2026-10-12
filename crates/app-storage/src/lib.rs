@@ -33,6 +33,23 @@ pub struct TestRecord {
     pub elapsed_ms: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RecoveryOperation {
+    Provision,
+    Rebuild,
+    Delete,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RecoveryRecord {
+    pub env_id: String,
+    pub operation: RecoveryOperation,
+    pub instance_id: String,
+    pub ownership_nonce: String,
+    pub namespace: String,
+    pub replacement_namespace: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubmissionSummary {
     pub submission_id: String,
@@ -74,6 +91,14 @@ impl EnvironmentStore {
              CREATE TABLE IF NOT EXISTS runtime_metadata (
                  metadata_key TEXT PRIMARY KEY NOT NULL,
                  metadata_value TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS environment_recovery (
+                 env_id TEXT PRIMARY KEY NOT NULL,
+                 operation TEXT NOT NULL CHECK (operation IN ('provision', 'rebuild', 'delete')),
+                 instance_id TEXT NOT NULL,
+                 ownership_nonce TEXT NOT NULL,
+                 namespace TEXT NOT NULL,
+                 replacement_namespace TEXT
              );",
         )?;
         Ok(Self { connection })
@@ -199,6 +224,59 @@ impl EnvironmentStore {
         }
         Ok(environments)
     }
+
+    pub fn save_recovery(&mut self, recovery: &RecoveryRecord) -> Result<(), StorageError> {
+        validate_recovery(recovery)?;
+        self.connection.execute(
+            "INSERT INTO environment_recovery (
+                 env_id, operation, instance_id, ownership_nonce, namespace, replacement_namespace
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(env_id) DO UPDATE SET
+                 operation = excluded.operation,
+                 instance_id = excluded.instance_id,
+                 ownership_nonce = excluded.ownership_nonce,
+                 namespace = excluded.namespace,
+                 replacement_namespace = excluded.replacement_namespace",
+            params![
+                recovery.env_id,
+                recovery_operation_name(recovery.operation),
+                recovery.instance_id,
+                recovery.ownership_nonce,
+                recovery.namespace,
+                recovery.replacement_namespace,
+            ],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_recoveries(&self) -> Result<Vec<RecoveryRecord>, StorageError> {
+        let mut statement = self.connection.prepare(
+            "SELECT env_id, operation, instance_id, ownership_nonce, namespace, replacement_namespace
+             FROM environment_recovery ORDER BY env_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            ))
+        })?;
+        rows.map(|row| decode_recovery(row?)).collect()
+    }
+
+    pub fn clear_recovery(&mut self, env_id: &str) -> Result<(), StorageError> {
+        if env_id.trim().is_empty() {
+            return Err(StorageError::InvalidEnvironment("environment id"));
+        }
+        self.connection.execute(
+            "DELETE FROM environment_recovery WHERE env_id = ?1",
+            [env_id],
+        )?;
+        Ok(())
+    }
 }
 
 fn validate_environment(environment: &EnvironmentRecord) -> Result<(), StorageError> {
@@ -229,6 +307,69 @@ fn is_owned_namespace(namespace: &str) -> bool {
         && namespace
             .bytes()
             .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_')
+}
+
+fn validate_recovery(recovery: &RecoveryRecord) -> Result<(), StorageError> {
+    if recovery.env_id.trim().is_empty() {
+        return Err(StorageError::InvalidEnvironment("environment id"));
+    }
+    if recovery.instance_id.trim().is_empty() {
+        return Err(StorageError::InvalidEnvironment("instance id"));
+    }
+    if recovery.ownership_nonce.trim().is_empty() {
+        return Err(StorageError::InvalidEnvironment("ownership nonce"));
+    }
+    if !is_owned_namespace(&recovery.namespace) {
+        return Err(StorageError::InvalidEnvironment("namespace"));
+    }
+    if recovery
+        .replacement_namespace
+        .as_deref()
+        .is_some_and(|namespace| !is_owned_namespace(namespace))
+    {
+        return Err(StorageError::InvalidEnvironment("replacement namespace"));
+    }
+    Ok(())
+}
+
+fn recovery_operation_name(operation: RecoveryOperation) -> &'static str {
+    match operation {
+        RecoveryOperation::Provision => "provision",
+        RecoveryOperation::Rebuild => "rebuild",
+        RecoveryOperation::Delete => "delete",
+    }
+}
+
+fn decode_recovery(
+    (env_id, operation, instance_id, ownership_nonce, namespace, replacement_namespace): (
+        String,
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+    ),
+) -> Result<RecoveryRecord, StorageError> {
+    let operation = match operation.as_str() {
+        "provision" => RecoveryOperation::Provision,
+        "rebuild" => RecoveryOperation::Rebuild,
+        "delete" => RecoveryOperation::Delete,
+        _ => {
+            return Err(StorageError::InvalidEnvironment(
+                "unknown recovery operation",
+            ));
+        }
+    };
+    let recovery = RecoveryRecord {
+        env_id,
+        operation,
+        instance_id,
+        ownership_nonce,
+        namespace,
+        replacement_namespace,
+    };
+    validate_recovery(&recovery)?;
+    Ok(recovery)
 }
 
 fn environment_mode_name(mode: EnvironmentMode) -> &'static str {

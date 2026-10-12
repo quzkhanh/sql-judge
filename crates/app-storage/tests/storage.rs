@@ -1,4 +1,6 @@
-use app_storage::{EnvironmentStore, HistoryStore, SubmissionRecord, TestRecord};
+use app_storage::{
+    EnvironmentStore, HistoryStore, RecoveryOperation, RecoveryRecord, SubmissionRecord, TestRecord,
+};
 use environment_manager::{EnvironmentMode, EnvironmentRecord, EnvironmentState};
 
 fn record(id: &str) -> SubmissionRecord {
@@ -197,6 +199,42 @@ fn environment_store_rejects_unowned_namespace_names() {
             .get_environment("env-a")
             .expect("query environments")
             .is_none()
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn recovery_journal_survives_reopen_and_can_be_cleared() {
+    let path =
+        std::env::temp_dir().join(format!("sql-judge-recovery-{}.sqlite", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let recovery = RecoveryRecord {
+        env_id: "env-a".to_owned(),
+        operation: RecoveryOperation::Rebuild,
+        instance_id: "instance-env-a".to_owned(),
+        ownership_nonce: "nonce-env-a".to_owned(),
+        namespace: "sj_env_a".to_owned(),
+        replacement_namespace: Some("sj_env_a_next".to_owned()),
+    };
+
+    {
+        let mut store = EnvironmentStore::open(&path).expect("open recovery store");
+        store
+            .save_recovery(&recovery)
+            .expect("save recovery record");
+    }
+
+    let mut store = EnvironmentStore::open(&path).expect("reopen recovery store");
+    let records = store.list_recoveries().expect("list recovery records");
+    assert_eq!(records, vec![recovery]);
+    store
+        .clear_recovery("env-a")
+        .expect("clear recovery record");
+    assert!(
+        store
+            .list_recoveries()
+            .expect("list cleared records")
+            .is_empty()
     );
     let _ = std::fs::remove_file(path);
 }
