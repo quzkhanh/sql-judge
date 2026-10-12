@@ -48,6 +48,31 @@ export type ManagedRuntimeStatus = {
   message: string
 }
 
+export type CreateManagedEnvironmentRequest = {
+  envId: string
+  packId: string
+  namespace: string
+}
+
+export type CloneManagedEnvironmentRequest = {
+  sourceEnvId: string
+  envId: string
+  namespace: string
+}
+
+export type ResetManagedEnvironmentRequest = {
+  envId: string
+  instanceId: string
+  namespace: string
+  confirmed: boolean
+}
+
+export type DeleteManagedEnvironmentRequest = {
+  envId: string
+  instanceId: string
+  confirmed: boolean
+}
+
 export async function runJudge(
   request: JudgeRunRequest
 ): Promise<JudgeRunResult> {
@@ -87,6 +112,71 @@ export async function inspectManagedEnvironment(
     "inspect_managed_environment",
     { envId }
   )
+}
+
+export async function createManagedEnvironment(
+  request: CreateManagedEnvironmentRequest
+): Promise<ManagedEnvironmentSummary> {
+  if (!isTauri()) {
+    throw new Error(
+      "Managed environments are unavailable in browser preview mode."
+    )
+  }
+
+  return trackedInvoke<ManagedEnvironmentSummary>(
+    "create_managed_environment",
+    request
+  )
+}
+
+export async function cloneManagedEnvironment(
+  request: CloneManagedEnvironmentRequest
+): Promise<ManagedEnvironmentSummary> {
+  if (!isTauri()) {
+    throw new Error(
+      "Managed environments are unavailable in browser preview mode."
+    )
+  }
+
+  return trackedInvoke<ManagedEnvironmentSummary>(
+    "clone_managed_environment",
+    request
+  )
+}
+
+export async function resetManagedEnvironment(
+  request: ResetManagedEnvironmentRequest
+): Promise<ManagedEnvironmentSummary> {
+  if (!isTauri()) {
+    throw new Error(
+      "Managed environments are unavailable in browser preview mode."
+    )
+  }
+
+  if (!request.confirmed) {
+    throw new Error("Explicit reset confirmation is required.")
+  }
+
+  return trackedInvoke<ManagedEnvironmentSummary>(
+    "reset_managed_environment",
+    request
+  )
+}
+
+export async function deleteManagedEnvironment(
+  request: DeleteManagedEnvironmentRequest
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error(
+      "Managed environments are unavailable in browser preview mode."
+    )
+  }
+
+  if (!request.confirmed) {
+    throw new Error("Explicit delete confirmation is required.")
+  }
+
+  await trackedInvoke<void>("delete_managed_environment", request)
 }
 
 export async function getManagedRuntimeStatus(): Promise<ManagedRuntimeStatus> {
