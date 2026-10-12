@@ -3,7 +3,9 @@ use environment_manager::{
     EnvironmentLedger, EnvironmentMode, EnvironmentRecord, EnvironmentState,
 };
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, Verdict};
-use judge_postgres::{JudgeCase, ManagedPostgresRuntime, PostgresSession, judge_submission};
+use judge_postgres::{
+    JudgeCase, ManagedEnvironment, ManagedPostgresRuntime, PostgresSession, judge_submission,
+};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -56,11 +58,27 @@ const EMPTY_FIXTURE_SQL: &str =
     include_str!("../../examples/packs/hr-sql-101/problems/above-average/tests/empty.sql");
 
 struct ManagedEnvironmentState {
-    _store: EnvironmentStore,
+    store: EnvironmentStore,
     ledger: EnvironmentLedger,
     runtime_root: PathBuf,
     runtime_instance_id: String,
     runtime: Option<ManagedPostgresRuntime>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CreateEnvironmentRequest {
+    env_id: String,
+    pack_id: String,
+    namespace: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CloneEnvironmentRequest {
+    source_env_id: String,
+    env_id: String,
+    namespace: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -112,7 +130,7 @@ fn load_environment_state(path: &Path) -> Result<ManagedEnvironmentState, String
         .unwrap_or_else(|| Path::new("."))
         .join("postgres-runtime");
     Ok(ManagedEnvironmentState {
-        _store: store,
+        store,
         ledger,
         runtime_root,
         runtime_instance_id,
@@ -146,6 +164,130 @@ fn ensure_managed_runtime(
         state.runtime = Some(runtime);
     }
     Ok(managed_runtime_status_value(true))
+}
+
+fn ownership_nonce(kind: &str, env_id: &str) -> String {
+    format!(
+        "nonce-{kind}-{env_id}-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos())
+    )
+}
+
+fn environment_summary(record: &EnvironmentRecord) -> Result<ManagedEnvironmentSummary, String> {
+    managed_environment_summary(record)
+        .ok_or_else(|| "Only managed environments can be returned by this command.".to_owned())
+}
+
+fn provision_record(
+    state: &mut ManagedEnvironmentState,
+    record: EnvironmentRecord,
+) -> Result<ManagedEnvironmentSummary, String> {
+    state
+        .ledger
+        .create(record.clone())
+        .map_err(|_| "Managed environment could not be reserved.".to_owned())?;
+    provision_reserved_record(state, record)
+}
+
+fn provision_reserved_record(
+    state: &mut ManagedEnvironmentState,
+    record: EnvironmentRecord,
+) -> Result<ManagedEnvironmentSummary, String> {
+    state
+        .store
+        .save_environment(&record)
+        .map_err(|_| "Managed environment reservation could not be saved.".to_owned())?;
+
+    let environment = ManagedEnvironment::new(
+        record.env_id.clone(),
+        record.instance_id.clone(),
+        record.namespace.clone(),
+        record.ownership_nonce.clone(),
+    )
+    .map_err(|_| "Managed environment identity failed policy validation.".to_owned())?;
+    let connection = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| "Managed PostgreSQL runtime is unavailable.".to_owned())?
+        .connection_string();
+    let mut session = PostgresSession::connect(&connection)
+        .map_err(|_| "Managed PostgreSQL runtime connection failed.".to_owned())?;
+    session
+        .provision_managed_namespace_with_schema(&environment, "sqljudge_runner", SCHEMA_SQL)
+        .map_err(|_| "Managed environment schema provisioning failed.".to_owned())?;
+    state
+        .ledger
+        .mark_ready(&record.env_id)
+        .map_err(|_| "Managed environment could not enter the ready state.".to_owned())?;
+    let ready = state
+        .ledger
+        .inspect(&record.env_id)
+        .map_err(|_| "Managed environment could not be read after provisioning.".to_owned())?
+        .clone();
+    state
+        .store
+        .save_environment(&ready)
+        .map_err(|_| "Managed environment ready state could not be saved.".to_owned())?;
+    environment_summary(&ready)
+}
+
+fn create_managed_environment_value(
+    request: CreateEnvironmentRequest,
+    state: &Mutex<ManagedEnvironmentState>,
+) -> Result<ManagedEnvironmentSummary, String> {
+    if request.pack_id != "hr-sql-101"
+        || request.env_id.trim().is_empty()
+        || request.namespace.trim().is_empty()
+    {
+        return Err("The requested managed pack or environment identity is invalid.".to_owned());
+    }
+    let mut state = state
+        .lock()
+        .map_err(|_| "Managed environment state is busy.".to_owned())?;
+    ensure_managed_runtime(&mut state)?;
+    let record = EnvironmentRecord {
+        env_id: request.env_id.clone(),
+        instance_id: state.runtime_instance_id.clone(),
+        pack_id: request.pack_id,
+        namespace: request.namespace,
+        ownership_nonce: ownership_nonce("create", &request.env_id),
+        mode: EnvironmentMode::Managed,
+        state: EnvironmentState::Provisioning,
+    };
+    provision_record(&mut state, record)
+}
+
+fn clone_managed_environment_value(
+    request: CloneEnvironmentRequest,
+    state: &Mutex<ManagedEnvironmentState>,
+) -> Result<ManagedEnvironmentSummary, String> {
+    if request.source_env_id.trim().is_empty()
+        || request.env_id.trim().is_empty()
+        || request.namespace.trim().is_empty()
+    {
+        return Err("The requested managed environment identity is invalid.".to_owned());
+    }
+    let mut state = state
+        .lock()
+        .map_err(|_| "Managed environment state is busy.".to_owned())?;
+    ensure_managed_runtime(&mut state)?;
+    let replacement = EnvironmentRecord {
+        env_id: request.env_id.clone(),
+        instance_id: state.runtime_instance_id.clone(),
+        pack_id: String::new(),
+        namespace: request.namespace,
+        ownership_nonce: ownership_nonce("clone", &request.env_id),
+        mode: EnvironmentMode::Managed,
+        state: EnvironmentState::Provisioning,
+    };
+    let record = state
+        .ledger
+        .clone_environment(&request.source_env_id, replacement)
+        .map_err(|_| "Managed environment could not be cloned.".to_owned())?;
+    provision_reserved_record(&mut state, record)
 }
 
 fn managed_environment_summary(record: &EnvironmentRecord) -> Option<ManagedEnvironmentSummary> {
@@ -381,6 +523,22 @@ fn inspect_managed_environment(
 }
 
 #[tauri::command]
+fn create_managed_environment(
+    request: CreateEnvironmentRequest,
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> Result<ManagedEnvironmentSummary, String> {
+    create_managed_environment_value(request, state.inner())
+}
+
+#[tauri::command]
+fn clone_managed_environment(
+    request: CloneEnvironmentRequest,
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> Result<ManagedEnvironmentSummary, String> {
+    clone_managed_environment_value(request, state.inner())
+}
+
+#[tauri::command]
 fn managed_runtime_status(
     state: State<'_, Mutex<ManagedEnvironmentState>>,
 ) -> Result<ManagedRuntimeStatus, String> {
@@ -462,6 +620,8 @@ pub fn run() {
             submit_solution,
             list_managed_environments,
             inspect_managed_environment,
+            create_managed_environment,
+            clone_managed_environment,
             managed_runtime_status,
             start_managed_runtime
         ])
@@ -478,9 +638,10 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        JudgeRunRequest, SUPPORTED_PROBLEM_ID, ensure_managed_runtime, judge_request,
-        load_environment_state, managed_environment_summary, managed_runtime_status_value,
-        unavailable_judge, verdict_name,
+        CloneEnvironmentRequest, CreateEnvironmentRequest, JudgeRunRequest, SUPPORTED_PROBLEM_ID,
+        clone_managed_environment_value, create_managed_environment_value, ensure_managed_runtime,
+        judge_request, load_environment_state, managed_environment_summary,
+        managed_runtime_status_value, unavailable_judge, verdict_name,
     };
     use std::sync::Mutex;
 
@@ -550,6 +711,49 @@ mod tests {
         );
         assert_eq!(submit.status, "completed");
         assert_eq!(submit.verdict.as_deref(), Some("WrongAnswer"));
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_create_and_clone_provision_isolated_ready_environments() {
+        let root = std::env::temp_dir().join(format!(
+            "sql-judge-tauri-environments-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).expect("create test root");
+        let state = Mutex::new(
+            load_environment_state(&root.join("state.sqlite")).expect("load native state"),
+        );
+        let first = create_managed_environment_value(
+            CreateEnvironmentRequest {
+                env_id: "env-a".to_owned(),
+                pack_id: "hr-sql-101".to_owned(),
+                namespace: "sj_env_a".to_owned(),
+            },
+            &state,
+        )
+        .expect("create first environment");
+        let second = clone_managed_environment_value(
+            CloneEnvironmentRequest {
+                source_env_id: "env-a".to_owned(),
+                env_id: "env-b".to_owned(),
+                namespace: "sj_env_b".to_owned(),
+            },
+            &state,
+        )
+        .expect("clone second environment");
+
+        assert_eq!(first.state, "ready");
+        assert_eq!(second.state, "ready");
+        assert_ne!(first.namespace, second.namespace);
+        let state_guard = state.lock().expect("lock native state");
+        assert_eq!(state_guard.ledger.list().len(), 2);
+        drop(state_guard);
         drop(state);
         let _ = std::fs::remove_dir_all(root);
     }

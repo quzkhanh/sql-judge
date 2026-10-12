@@ -63,6 +63,11 @@ impl EnvironmentLedger {
             .records
             .get(source_id)
             .ok_or(LifecycleError::NotFound)?;
+        if source.mode != crate::EnvironmentMode::Managed {
+            return Err(LifecycleError::Ownership(
+                OwnershipError::ExternalEnvironment,
+            ));
+        }
         replacement.pack_id = source.pack_id.clone();
         self.create(replacement.clone())?;
         Ok(replacement)

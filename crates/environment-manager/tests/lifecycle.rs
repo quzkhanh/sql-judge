@@ -43,6 +43,19 @@ fn create_and_clone_keep_same_pack_namespaces_isolated() {
 }
 
 #[test]
+fn clone_rejects_external_source_environment() {
+    let mut ledger = EnvironmentLedger::default();
+    let mut external = record("external-a", "sj_external");
+    external.mode = EnvironmentMode::ExternalExplorer;
+    ledger.create(external).expect("create external record");
+
+    assert!(matches!(
+        ledger.clone_environment("external-a", record("env-b", "sj_b")),
+        Err(LifecycleError::Ownership(_))
+    ));
+}
+
+#[test]
 fn failed_rebuild_preserves_old_record_and_delete_requires_ownership() {
     let mut ledger = EnvironmentLedger::default();
     ledger.create(record("env-a", "sj_a")).expect("create");
