@@ -471,6 +471,13 @@ fn watchdog_timeout_is_distinct_from_user_cancellation() {
     assert_eq!(report.verdict, Verdict::TimeLimitExceeded);
     assert!(report.tests.is_empty());
     assert!(started.elapsed() < std::time::Duration::from_secs(2));
+    let leftovers = admin
+        .execute(
+            "SELECT count(*) FROM pg_catalog.pg_namespace WHERE nspname LIKE 'sj_fixture_%'",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("inspect temporary fixture cleanup");
+    assert_eq!(leftovers.rows[0][0], SqlValue::Signed(0));
 }
 
 #[test]
