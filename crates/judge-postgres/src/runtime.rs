@@ -1,0 +1,135 @@
+use super::{PostgresSession, QueryExecutionError};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::{Command, Stdio};
+
+pub struct ManagedPostgresRuntime {
+    root: PathBuf,
+    socket: PathBuf,
+    user: String,
+}
+
+impl ManagedPostgresRuntime {
+    pub fn start(root: impl AsRef<Path>, instance_id: &str) -> Result<Self, QueryExecutionError> {
+        if instance_id.trim().is_empty() {
+            return Err(QueryExecutionError::PolicyViolation);
+        }
+
+        let root = root.as_ref().to_path_buf();
+        if !root.is_absolute() || root.exists() {
+            return Err(QueryExecutionError::PolicyViolation);
+        }
+        let socket = root.join("socket");
+        let user = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .map_err(|_| QueryExecutionError::ConnectionError)?;
+        if user.trim().is_empty() {
+            return Err(QueryExecutionError::ConnectionError);
+        }
+
+        let parent = root.parent().ok_or(QueryExecutionError::PolicyViolation)?;
+        fs::create_dir_all(parent).map_err(|_| QueryExecutionError::ConnectionError)?;
+        fs::create_dir(&root).map_err(|_| QueryExecutionError::ConnectionError)?;
+
+        let initialized = Command::new("initdb")
+            .args([
+                "-D",
+                root.to_str().ok_or(QueryExecutionError::PolicyViolation)?,
+                "--username",
+                &user,
+                "--auth-local=peer",
+                "--auth-host=reject",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| QueryExecutionError::ConnectionError)?;
+        if !initialized.success() {
+            let _ = fs::remove_dir_all(&root);
+            return Err(QueryExecutionError::ConnectionError);
+        }
+        if fs::create_dir(&socket).is_err() {
+            let _ = fs::remove_dir_all(&root);
+            return Err(QueryExecutionError::ConnectionError);
+        }
+
+        let options = format!(
+            "-k {} -p 5432 -c listen_addresses=''",
+            socket
+                .to_str()
+                .ok_or(QueryExecutionError::PolicyViolation)?
+        );
+        let started = Command::new("pg_ctl")
+            .args([
+                "-D",
+                root.to_str().ok_or(QueryExecutionError::PolicyViolation)?,
+                "-o",
+                &options,
+                "-w",
+                "start",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map_err(|_| QueryExecutionError::ConnectionError)?;
+        if !started.success() {
+            let _ = fs::remove_dir_all(&root);
+            return Err(QueryExecutionError::ConnectionError);
+        }
+
+        let runtime = Self { root, socket, user };
+        if let Err(error) = runtime.initialize(instance_id) {
+            drop(runtime);
+            return Err(error);
+        }
+        Ok(runtime)
+    }
+
+    pub fn connection_string(&self) -> String {
+        format!(
+            "host={} user={} dbname=postgres",
+            self.socket.to_string_lossy(),
+            self.user
+        )
+    }
+
+    fn initialize(&self, instance_id: &str) -> Result<(), QueryExecutionError> {
+        let mut session = PostgresSession::connect(&self.connection_string())?;
+        session
+            .client
+            .batch_execute(
+                "CREATE ROLE sqljudge_runner NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT NOBYPASSRLS NOREPLICATION NOLOGIN;
+                 REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+                 CREATE TABLE public.__sql_judge_runtime (instance_id text PRIMARY KEY)",
+            )
+            .map_err(|_| QueryExecutionError::RuntimeError)?;
+        session
+            .client
+            .execute(
+                "INSERT INTO public.__sql_judge_runtime (instance_id) VALUES ($1)",
+                &[&instance_id],
+            )
+            .map_err(|_| QueryExecutionError::RuntimeError)?;
+        session
+            .client
+            .batch_execute("REVOKE ALL ON TABLE public.__sql_judge_runtime FROM PUBLIC")
+            .map_err(|_| QueryExecutionError::RuntimeError)
+    }
+}
+
+impl Drop for ManagedPostgresRuntime {
+    fn drop(&mut self) {
+        let _ = Command::new("pg_ctl")
+            .args([
+                "-D",
+                self.root.to_string_lossy().as_ref(),
+                "-w",
+                "stop",
+                "-m",
+                "fast",
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+}

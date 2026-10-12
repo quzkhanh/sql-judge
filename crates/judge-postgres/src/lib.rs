@@ -8,8 +8,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 mod orchestrator;
+mod runtime;
 
 pub use orchestrator::{JudgeCase, SubmissionReport, TestOutcome, judge_submission};
+pub use runtime::ManagedPostgresRuntime;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum QueryExecutionError {
