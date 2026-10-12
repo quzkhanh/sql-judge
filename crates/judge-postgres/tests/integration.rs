@@ -1,7 +1,7 @@
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, SqlValue, Verdict};
 use judge_postgres::{
     CancellationToken, JudgeCase, ManagedEnvironment, PostgresSession, QueryExecutionError,
-    judge_submission, judge_submission_with_cancel,
+    judge_submission, judge_submission_with_cancel, judge_submission_with_watchdog,
 };
 use std::io::Write;
 use std::net::TcpListener;
@@ -430,6 +430,37 @@ fn cancellation_stops_before_fixture_execution() {
 
     assert_eq!(report.verdict, Verdict::Cancelled);
     assert!(report.tests.is_empty());
+}
+
+#[test]
+fn watchdog_timeout_is_distinct_from_user_cancellation() {
+    let server = TestServer::start();
+    let mut admin =
+        PostgresSession::connect(&server.admin_connection_string()).expect("connect admin");
+    let started = std::time::Instant::now();
+    let report = judge_submission_with_watchdog(
+        &mut admin,
+        "sqljudge_runner",
+        &[JudgeCase {
+            id: "watchdog",
+            schema_sql: "CREATE TABLE values_table (id integer);",
+            fixture_sql: "INSERT INTO values_table VALUES (1);",
+            reference_sql: "SELECT count(*) FROM generate_series(1, 1000000000)",
+            output: OutputPolicy::new(
+                RowOrder::Ordered,
+                true,
+                true,
+                vec![Column::new("count", LogicalType::Bigint)],
+            ),
+            limits: QueryLimits::new(10_000, 10, 64 * 1024),
+        }],
+        "SELECT 1",
+        std::time::Duration::from_millis(100),
+    );
+
+    assert_eq!(report.verdict, Verdict::TimeLimitExceeded);
+    assert!(report.tests.is_empty());
+    assert!(started.elapsed() < std::time::Duration::from_secs(2));
 }
 
 #[test]

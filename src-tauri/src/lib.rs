@@ -5,7 +5,7 @@ use environment_manager::{
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, Verdict};
 use judge_postgres::{
     CancellationToken, JudgeCase, ManagedEnvironment, ManagedPostgresRuntime, PostgresSession,
-    judge_submission_with_token,
+    judge_submission_with_watchdog_token,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -778,12 +778,13 @@ fn judge_request(
             };
         }
     };
-    let report = judge_submission_with_token(
+    let report = judge_submission_with_watchdog_token(
         &mut session,
         "sqljudge_runner",
         &judge_cases(expected_mode == "submit"),
         &request.sql,
         &cancellation_token,
+        std::time::Duration::from_secs(5),
     );
     let duration_ms = started.elapsed().as_millis() as u64;
     let verdict = verdict_name(report.verdict).to_owned();

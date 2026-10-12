@@ -15,7 +15,8 @@ mod runtime;
 
 pub use orchestrator::{
     JudgeCase, SubmissionReport, TestOutcome, judge_submission, judge_submission_with_cancel,
-    judge_submission_with_token,
+    judge_submission_with_token, judge_submission_with_watchdog,
+    judge_submission_with_watchdog_token,
 };
 pub use runtime::ManagedPostgresRuntime;
 
@@ -46,19 +47,53 @@ pub enum QueryExecutionError {
 #[derive(Clone, Default)]
 pub struct CancellationToken {
     cancelled: Arc<AtomicBool>,
+    reason: Arc<AtomicBool>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CancellationReason {
+    User,
+    Watchdog,
 }
 
 impl CancellationToken {
     pub fn cancel(&self) {
-        self.cancelled.store(true, Ordering::Release);
+        if self
+            .cancelled
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.reason.store(false, Ordering::Release);
+        }
+    }
+
+    pub fn cancel_for_watchdog(&self) {
+        if self
+            .cancelled
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            self.reason.store(true, Ordering::Release);
+        }
     }
 
     pub fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
 
+    pub fn reason(&self) -> Option<CancellationReason> {
+        if !self.is_cancelled() {
+            return None;
+        }
+        Some(if self.reason.load(Ordering::Acquire) {
+            CancellationReason::Watchdog
+        } else {
+            CancellationReason::User
+        })
+    }
+
     pub fn same_instance(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.cancelled, &other.cancelled)
+        Arc::ptr_eq(&self.cancelled, &other.cancelled) && Arc::ptr_eq(&self.reason, &other.reason)
     }
 }
 

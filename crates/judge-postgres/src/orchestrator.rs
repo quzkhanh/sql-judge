@@ -1,8 +1,11 @@
-use crate::{CancellationToken, PostgresSession, QueryExecutionError};
+use crate::{CancellationReason, CancellationToken, PostgresSession, QueryExecutionError};
 use judge_core::{
     ComparisonMismatch, OutputPolicy, QueryLimits, QueryResult, Verdict, aggregate_verdicts,
     compare_query_results,
 };
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 
 #[derive(Debug, Clone)]
 pub struct JudgeCase<'a> {
@@ -71,6 +74,45 @@ pub fn judge_submission_with_token(
     )
 }
 
+pub fn judge_submission_with_watchdog(
+    session: &mut PostgresSession,
+    runner_role: &str,
+    cases: &[JudgeCase<'_>],
+    user_sql: &str,
+    watchdog_after: Duration,
+) -> SubmissionReport {
+    let token = CancellationToken::default();
+    judge_submission_with_watchdog_token(
+        session,
+        runner_role,
+        cases,
+        user_sql,
+        &token,
+        watchdog_after,
+    )
+}
+
+pub fn judge_submission_with_watchdog_token(
+    session: &mut PostgresSession,
+    runner_role: &str,
+    cases: &[JudgeCase<'_>],
+    user_sql: &str,
+    token: &CancellationToken,
+    watchdog_after: Duration,
+) -> SubmissionReport {
+    let (finished, deadline) = mpsc::channel();
+    let watchdog_token = token.clone();
+    let watchdog = thread::spawn(move || {
+        if deadline.recv_timeout(watchdog_after).is_err() {
+            watchdog_token.cancel_for_watchdog();
+        }
+    });
+    let report = judge_submission_with_token(session, runner_role, cases, user_sql, token);
+    let _ = finished.send(());
+    let _ = watchdog.join();
+    report
+}
+
 fn judge_submission_inner(
     session: &mut PostgresSession,
     runner_role: &str,
@@ -84,7 +126,7 @@ fn judge_submission_inner(
     for case in cases {
         if is_cancelled() {
             return SubmissionReport {
-                verdict: Verdict::Cancelled,
+                verdict: cancellation_verdict(cancellation),
                 tests,
             };
         }
@@ -109,7 +151,7 @@ fn judge_submission_inner(
 
         if is_cancelled() {
             return SubmissionReport {
-                verdict: Verdict::Cancelled,
+                verdict: cancellation_verdict(cancellation),
                 tests,
             };
         }
@@ -166,6 +208,13 @@ fn judge_submission_inner(
     SubmissionReport {
         verdict: aggregate_verdicts(&verdicts),
         tests,
+    }
+}
+
+fn cancellation_verdict(token: Option<&CancellationToken>) -> Verdict {
+    match token.and_then(CancellationToken::reason) {
+        Some(CancellationReason::Watchdog) => Verdict::TimeLimitExceeded,
+        Some(CancellationReason::User) | None => Verdict::Cancelled,
     }
 }
 
