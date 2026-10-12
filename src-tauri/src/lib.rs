@@ -307,6 +307,15 @@ fn clone_managed_environment_value(
     provision_reserved_record(&mut state, record)
 }
 
+fn lifecycle_failure(state: &mut ManagedEnvironmentState, env_id: &str, message: &str) -> String {
+    if state.ledger.mark_error(env_id).is_ok()
+        && let Ok(record) = state.ledger.inspect(env_id).cloned()
+    {
+        let _ = state.store.save_environment(&record);
+    }
+    message.to_owned()
+}
+
 fn reset_managed_environment_value(
     request: ResetEnvironmentRequest,
     state: &Mutex<ManagedEnvironmentState>,
@@ -361,7 +370,13 @@ fn reset_managed_environment_value(
         replacement.namespace.clone(),
         replacement.ownership_nonce.clone(),
     )
-    .map_err(|_| "Managed replacement identity failed policy validation.".to_owned())?;
+    .map_err(|_| {
+        lifecycle_failure(
+            &mut state,
+            &request.env_id,
+            "Managed replacement identity failed policy validation.",
+        )
+    })?;
     let old_environment = ManagedEnvironment::new(
         current.env_id.clone(),
         current.instance_id.clone(),
@@ -1001,6 +1016,62 @@ mod tests {
                 .expect("reset environment")
                 .namespace,
             "sj_env_reset"
+        );
+        drop(state_guard);
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_reset_failure_persists_error_without_replacing_old_environment() {
+        let root = std::env::temp_dir().join(format!(
+            "sql-judge-tauri-reset-error-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).expect("create test root");
+        let state = Mutex::new(
+            load_environment_state(&root.join("state.sqlite")).expect("load native state"),
+        );
+        let created = create_managed_environment_value(
+            CreateEnvironmentRequest {
+                env_id: "env-a".to_owned(),
+                pack_id: "hr-sql-101".to_owned(),
+                namespace: "sj_env_a".to_owned(),
+            },
+            &state,
+        )
+        .expect("create environment");
+        let result = reset_managed_environment_value(
+            ResetEnvironmentRequest {
+                env_id: created.env_id.clone(),
+                instance_id: created.instance_id,
+                namespace: "public".to_owned(),
+                confirmed: true,
+            },
+            &state,
+        );
+
+        assert!(result.is_err());
+        let state_guard = state.lock().expect("lock native state");
+        assert_eq!(
+            state_guard
+                .ledger
+                .inspect("env-a")
+                .expect("environment")
+                .state,
+            environment_manager::EnvironmentState::Error
+        );
+        assert_eq!(
+            state_guard
+                .ledger
+                .inspect("env-a")
+                .expect("environment")
+                .namespace,
+            "sj_env_a"
         );
         drop(state_guard);
         drop(state);
