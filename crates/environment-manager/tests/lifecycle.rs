@@ -48,7 +48,7 @@ fn failed_rebuild_preserves_old_record_and_delete_requires_ownership() {
     ledger.create(record("env-a", "sj_a")).expect("create");
     let failed = ledger.rebuild(
         "env-a",
-        record("env-a-new", "sj_new"),
+        record("env-a", "sj_new"),
         reset_action("env-a"),
         |_| false,
     );
@@ -102,7 +102,7 @@ fn rebuild_rejects_namespace_collision_without_replacing_old_record() {
         .create(record("env-b", "sj_b"))
         .expect("create second");
 
-    let replacement = record("env-a-new", "sj_b");
+    let replacement = record("env-a", "sj_b");
     assert_eq!(
         ledger.rebuild("env-a", replacement, reset_action("env-a"), |_| true),
         Err(LifecycleError::NamespaceConflict)
@@ -140,7 +140,7 @@ fn rebuild_lock_blocks_delete_until_replacement_is_ready() {
     assert!(matches!(
         ledger.finish_rebuild(
             "env-a",
-            record("env-a-replacement", "sj_rebuilt"),
+            record("env-a", "sj_rebuilt"),
             DestructiveAction::Delete {
                 env_id: "env-a".to_owned(),
                 instance_id: "instance-env-a".to_owned(),
@@ -155,7 +155,7 @@ fn rebuild_lock_blocks_delete_until_replacement_is_ready() {
     ledger
         .finish_rebuild(
             "env-a",
-            record("env-a-replacement", "sj_rebuilt"),
+            record("env-a", "sj_rebuilt"),
             reset_action("env-a"),
             |_| true,
         )
@@ -210,6 +210,18 @@ fn delete_lock_requires_authorization_before_record_removal() {
         .finish_delete("env-a", action)
         .expect("finish delete");
     assert_eq!(ledger.inspect("env-a"), Err(LifecycleError::NotFound));
+}
+
+#[test]
+fn direct_delete_rejects_a_reset_action() {
+    let mut ledger = EnvironmentLedger::default();
+    ledger.create(record("env-a", "sj_a")).expect("create");
+
+    assert!(matches!(
+        ledger.delete("env-a", reset_action("env-a")),
+        Err(LifecycleError::Ownership(_))
+    ));
+    assert!(ledger.inspect("env-a").is_ok());
 }
 
 #[test]

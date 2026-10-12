@@ -87,7 +87,9 @@ impl EnvironmentLedger {
         F: FnOnce(&EnvironmentRecord) -> bool,
     {
         let current = self.records.get(env_id).ok_or(LifecycleError::NotFound)?;
+        require_reset_action(action.clone())?;
         authorize_destructive_action(current, action)?;
+        validate_replacement(current, &replacement)?;
         if !validate(&replacement) {
             return Err(LifecycleError::ReplacementValidationFailed);
         }
@@ -111,6 +113,7 @@ impl EnvironmentLedger {
         action: DestructiveAction,
     ) -> Result<(), LifecycleError> {
         let record = self.records.get(env_id).ok_or(LifecycleError::NotFound)?;
+        require_reset_action(action.clone())?;
         authorize_destructive_action(record, action)?;
         self.records
             .get_mut(env_id)
@@ -132,6 +135,7 @@ impl EnvironmentLedger {
         let current = self.records.get(env_id).ok_or(LifecycleError::NotFound)?;
         authorize_lifecycle_completion(current, action, EnvironmentState::Rebuilding)?;
         let pack_id = current.pack_id.clone();
+        validate_replacement(current, &replacement)?;
         if !validate(&replacement) {
             self.records
                 .get_mut(env_id)
@@ -191,6 +195,7 @@ impl EnvironmentLedger {
         action: DestructiveAction,
     ) -> Result<(), LifecycleError> {
         let record = self.records.get(env_id).ok_or(LifecycleError::NotFound)?;
+        require_delete_action(action.clone())?;
         authorize_destructive_action(record, action)?;
         self.records
             .get_mut(env_id)
@@ -215,6 +220,7 @@ impl EnvironmentLedger {
         action: DestructiveAction,
     ) -> Result<EnvironmentRecord, LifecycleError> {
         let record = self.records.get(env_id).ok_or(LifecycleError::NotFound)?;
+        require_delete_action(action.clone())?;
         authorize_destructive_action(record, action)?;
         self.records.remove(env_id).ok_or(LifecycleError::NotFound)
     }
@@ -273,6 +279,40 @@ fn authorize_lifecycle_completion(
         ));
     }
     Ok(())
+}
+
+fn validate_replacement(
+    current: &EnvironmentRecord,
+    replacement: &EnvironmentRecord,
+) -> Result<(), LifecycleError> {
+    if replacement.mode != crate::EnvironmentMode::Managed {
+        return Err(LifecycleError::Ownership(
+            OwnershipError::ExternalEnvironment,
+        ));
+    }
+    if replacement.instance_id != current.instance_id {
+        return Err(LifecycleError::Ownership(OwnershipError::InstanceMismatch));
+    }
+    if replacement.ownership_nonce != current.ownership_nonce {
+        return Err(LifecycleError::Ownership(OwnershipError::OwnershipMismatch));
+    }
+    Ok(())
+}
+
+fn require_reset_action(action: DestructiveAction) -> Result<(), LifecycleError> {
+    if matches!(action, DestructiveAction::Reset { .. }) {
+        Ok(())
+    } else {
+        Err(LifecycleError::Ownership(OwnershipError::InvalidState))
+    }
+}
+
+fn require_delete_action(action: DestructiveAction) -> Result<(), LifecycleError> {
+    if matches!(action, DestructiveAction::Delete { .. }) {
+        Ok(())
+    } else {
+        Err(LifecycleError::Ownership(OwnershipError::InvalidState))
+    }
 }
 
 fn validate_namespace(namespace: &str) -> Result<(), LifecycleError> {
