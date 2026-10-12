@@ -587,6 +587,54 @@ impl PostgresSession {
         }
     }
 
+    pub fn managed_namespace_is_owned(
+        &mut self,
+        environment: &ManagedEnvironment,
+    ) -> Result<bool, QueryExecutionError> {
+        let marker_exists = self
+            .client
+            .query_one(
+                "SELECT EXISTS (
+                     SELECT 1 FROM pg_catalog.pg_namespace n
+                     JOIN pg_catalog.pg_class c ON c.relnamespace = n.oid
+                     WHERE n.nspname = $1 AND c.relname = $2
+                       AND c.relkind IN ('r', 'p')
+                 )",
+                &[&environment.namespace, &"__sql_judge_ownership"],
+            )
+            .map_err(map_database_error)?
+            .get::<_, bool>(0);
+        if !marker_exists {
+            return Ok(false);
+        }
+        let owned_marker = self
+            .client
+            .query_opt(
+                &format!(
+                    "SELECT m.environment_id, m.instance_id, m.ownership_nonce,
+                            n.nspowner = u.usesysid AND c.relowner = u.usesysid
+                     FROM {schema}.\"__sql_judge_ownership\" m
+                     JOIN pg_catalog.pg_namespace n ON n.nspname = $1
+                     JOIN pg_catalog.pg_class c
+                       ON c.relnamespace = n.oid AND c.relname = $2
+                     JOIN pg_catalog.pg_user u ON u.usename = current_user",
+                    schema = quote_identifier(&environment.namespace),
+                ),
+                &[&environment.namespace, &"__sql_judge_ownership"],
+            )
+            .map_err(map_database_error)?
+            .is_some_and(|row| {
+                row.get::<_, String>(0) == environment.environment_id
+                    && row.get::<_, String>(1) == environment.instance_id
+                    && row.get::<_, String>(2) == environment.ownership_nonce
+                    && row.get::<_, bool>(3)
+            });
+        if !owned_marker {
+            return Err(QueryExecutionError::OwnershipVerificationFailed);
+        }
+        Ok(true)
+    }
+
     pub fn drop_managed_namespace(
         &mut self,
         environment: &ManagedEnvironment,

@@ -1,4 +1,6 @@
-use app_storage::{EnvironmentStore, HistoryStore, SubmissionRecord, TestRecord};
+use app_storage::{
+    EnvironmentStore, HistoryStore, RecoveryOperation, RecoveryRecord, SubmissionRecord, TestRecord,
+};
 use environment_manager::{
     DestructiveAction, EnvironmentLedger, EnvironmentMode, EnvironmentRecord, EnvironmentState,
 };
@@ -253,7 +255,163 @@ fn ensure_managed_runtime(
                 .map_err(|_| "Managed PostgreSQL runtime could not be started.".to_owned())?;
         state.runtime = Some(runtime);
     }
+    reconcile_environment_recovery(state)?;
     Ok(managed_runtime_status_value(true))
+}
+
+fn recovery_environment(
+    recovery: &RecoveryRecord,
+    namespace: &str,
+) -> Result<ManagedEnvironment, String> {
+    ManagedEnvironment::new(
+        recovery.env_id.clone(),
+        recovery.instance_id.clone(),
+        namespace.to_owned(),
+        recovery.ownership_nonce.clone(),
+    )
+    .map_err(|_| "Managed recovery identity failed policy validation.".to_owned())
+}
+
+fn drop_recovery_namespace(
+    session: &mut PostgresSession,
+    recovery: &RecoveryRecord,
+    namespace: &str,
+) -> Result<(), String> {
+    let environment = recovery_environment(recovery, namespace)?;
+    let owned = session
+        .managed_namespace_is_owned(&environment)
+        .map_err(|_| "Managed recovery ownership verification failed.".to_owned())?;
+    if owned {
+        session
+            .drop_managed_namespace(&environment)
+            .map_err(|_| "Managed recovery cleanup failed closed.".to_owned())?;
+    }
+    Ok(())
+}
+
+fn reconcile_environment_recovery(state: &mut ManagedEnvironmentState) -> Result<(), String> {
+    let recoveries = state
+        .store
+        .list_recoveries()
+        .map_err(|_| "Managed recovery journal could not be read.".to_owned())?;
+    if recoveries.is_empty() {
+        return Ok(());
+    }
+    let connection = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| "Managed PostgreSQL runtime is unavailable.".to_owned())?
+        .connection_string();
+    let mut session = PostgresSession::connect(&connection)
+        .map_err(|_| "Managed recovery runtime connection failed.".to_owned())?;
+
+    for recovery in recoveries {
+        match recovery.operation {
+            RecoveryOperation::Provision => {
+                drop_recovery_namespace(&mut session, &recovery, &recovery.namespace)?;
+                if state.ledger.inspect(&recovery.env_id).is_ok() {
+                    state
+                        .ledger
+                        .remove_recovered(&recovery.env_id)
+                        .map_err(|_| {
+                            "Managed provisioning recovery could not remove the ledger record."
+                                .to_owned()
+                        })?;
+                    state
+                        .store
+                        .delete_environment(&recovery.env_id)
+                        .map_err(|_| {
+                            "Managed provisioning recovery could not remove storage.".to_owned()
+                        })?;
+                }
+                state.store.clear_recovery(&recovery.env_id).map_err(|_| {
+                    "Managed provisioning recovery could not be cleared.".to_owned()
+                })?;
+            }
+            RecoveryOperation::Rebuild => {
+                let current = state.ledger.inspect(&recovery.env_id).ok().cloned();
+                match current {
+                    Some(current) if current.namespace == recovery.namespace => {
+                        if let Some(replacement) = recovery.replacement_namespace.as_deref() {
+                            drop_recovery_namespace(&mut session, &recovery, replacement)?;
+                        }
+                        state
+                            .ledger
+                            .recover_rebuild(&recovery.env_id)
+                            .map_err(|_| {
+                                "Managed rebuild recovery could not restore the ledger.".to_owned()
+                            })?;
+                        let ready = state
+                            .ledger
+                            .inspect(&recovery.env_id)
+                            .map_err(|_| "Managed rebuild recovery record disappeared.".to_owned())?
+                            .clone();
+                        state.store.save_environment(&ready).map_err(|_| {
+                            "Managed rebuild recovery state could not be saved.".to_owned()
+                        })?;
+                    }
+                    Some(current)
+                        if recovery.replacement_namespace.as_deref()
+                            == Some(current.namespace.as_str()) =>
+                    {
+                        drop_recovery_namespace(&mut session, &recovery, &recovery.namespace)?;
+                        state
+                            .ledger
+                            .recover_rebuild(&recovery.env_id)
+                            .map_err(|_| {
+                                "Managed rebuild recovery could not restore the ledger.".to_owned()
+                            })?;
+                        let ready = state
+                            .ledger
+                            .inspect(&recovery.env_id)
+                            .map_err(|_| "Managed rebuild recovery record disappeared.".to_owned())?
+                            .clone();
+                        state.store.save_environment(&ready).map_err(|_| {
+                            "Managed rebuild recovery state could not be saved.".to_owned()
+                        })?;
+                    }
+                    None => {
+                        if let Some(replacement) = recovery.replacement_namespace.as_deref() {
+                            drop_recovery_namespace(&mut session, &recovery, replacement)?;
+                        }
+                        drop_recovery_namespace(&mut session, &recovery, &recovery.namespace)?;
+                    }
+                    Some(_) => {
+                        return Err(
+                            "Managed rebuild recovery identity does not match the ledger."
+                                .to_owned(),
+                        );
+                    }
+                }
+                state
+                    .store
+                    .clear_recovery(&recovery.env_id)
+                    .map_err(|_| "Managed rebuild recovery could not be cleared.".to_owned())?;
+            }
+            RecoveryOperation::Delete => {
+                drop_recovery_namespace(&mut session, &recovery, &recovery.namespace)?;
+                if state.ledger.inspect(&recovery.env_id).is_ok() {
+                    state
+                        .ledger
+                        .remove_recovered(&recovery.env_id)
+                        .map_err(|_| {
+                            "Managed delete recovery could not remove the ledger record.".to_owned()
+                        })?;
+                    state
+                        .store
+                        .delete_environment(&recovery.env_id)
+                        .map_err(|_| {
+                            "Managed delete recovery could not remove storage.".to_owned()
+                        })?;
+                }
+                state
+                    .store
+                    .clear_recovery(&recovery.env_id)
+                    .map_err(|_| "Managed delete recovery could not be cleared.".to_owned())?;
+            }
+        }
+    }
+    Ok(())
 }
 
 fn ownership_nonce(kind: &str, env_id: &str) -> String {
@@ -286,6 +444,18 @@ fn provision_reserved_record(
     state: &mut ManagedEnvironmentState,
     record: EnvironmentRecord,
 ) -> Result<ManagedEnvironmentSummary, String> {
+    let recovery = RecoveryRecord {
+        env_id: record.env_id.clone(),
+        operation: RecoveryOperation::Provision,
+        instance_id: record.instance_id.clone(),
+        ownership_nonce: record.ownership_nonce.clone(),
+        namespace: record.namespace.clone(),
+        replacement_namespace: None,
+    };
+    state
+        .store
+        .save_recovery(&recovery)
+        .map_err(|_| "Managed environment recovery intent could not be saved.".to_owned())?;
     state
         .store
         .save_environment(&record)
@@ -321,6 +491,10 @@ fn provision_reserved_record(
         .store
         .save_environment(&ready)
         .map_err(|_| "Managed environment ready state could not be saved.".to_owned())?;
+    state
+        .store
+        .clear_recovery(&record.env_id)
+        .map_err(|_| "Managed environment recovery intent could not be cleared.".to_owned())?;
     environment_summary(&ready)
 }
 
@@ -423,6 +597,21 @@ fn reset_managed_environment_value(
         .inspect(&request.env_id)
         .map_err(|_| "Managed environment reset state could not be read.".to_owned())?
         .clone();
+    let recovery = RecoveryRecord {
+        env_id: current.env_id.clone(),
+        operation: RecoveryOperation::Rebuild,
+        instance_id: current.instance_id.clone(),
+        ownership_nonce: current.ownership_nonce.clone(),
+        namespace: current.namespace.clone(),
+        replacement_namespace: Some(request.namespace.clone()),
+    };
+    state.store.save_recovery(&recovery).map_err(|_| {
+        lifecycle_failure(
+            &mut state,
+            &request.env_id,
+            "Managed reset recovery intent could not be saved.",
+        )
+    })?;
     state
         .store
         .save_environment(&rebuilding)
@@ -500,6 +689,10 @@ fn reset_managed_environment_value(
             .map_err(|_| "Managed reset cleanup state could not be saved.".to_owned())?;
         return Err("Managed reset replacement succeeded but old cleanup failed.".to_owned());
     }
+    state
+        .store
+        .clear_recovery(&request.env_id)
+        .map_err(|_| "Managed reset recovery intent could not be cleared.".to_owned())?;
     environment_summary(&ready)
 }
 
@@ -534,6 +727,18 @@ fn delete_managed_environment_value(
         .inspect(&request.env_id)
         .map_err(|_| "Managed environment delete state could not be read.".to_owned())?
         .clone();
+    let recovery = RecoveryRecord {
+        env_id: current.env_id.clone(),
+        operation: RecoveryOperation::Delete,
+        instance_id: current.instance_id.clone(),
+        ownership_nonce: current.ownership_nonce.clone(),
+        namespace: current.namespace.clone(),
+        replacement_namespace: None,
+    };
+    state
+        .store
+        .save_recovery(&recovery)
+        .map_err(|_| "Managed delete recovery intent could not be saved.".to_owned())?;
     state
         .store
         .save_environment(&deleting)
@@ -576,6 +781,10 @@ fn delete_managed_environment_value(
         .store
         .delete_environment(&request.env_id)
         .map_err(|_| "Managed environment could not be removed from storage.".to_owned())?;
+    state
+        .store
+        .clear_recovery(&request.env_id)
+        .map_err(|_| "Managed delete recovery intent could not be cleared.".to_owned())?;
     Ok(())
 }
 
@@ -1048,7 +1257,8 @@ pub fn run() {
 mod tests {
     use super::{
         CloneEnvironmentRequest, CreateEnvironmentRequest, DeleteEnvironmentRequest,
-        JudgeRunRequest, ResetEnvironmentRequest, SUPPORTED_PROBLEM_ID, cancel_judge_value,
+        DestructiveAction, JudgeRunRequest, RecoveryOperation, RecoveryRecord,
+        ResetEnvironmentRequest, SUPPORTED_PROBLEM_ID, cancel_judge_value,
         clone_managed_environment_value, create_managed_environment_value,
         delete_managed_environment_value, ensure_managed_runtime, judge_request,
         load_environment_state, managed_environment_summary, managed_runtime_status_value,
@@ -1063,6 +1273,88 @@ mod tests {
         assert!(registration.token.is_cancelled());
         drop(registration);
         assert!(!cancel_judge_value("request-1"));
+    }
+
+    #[test]
+    fn native_recovery_reconciles_interrupted_rebuild_without_touching_old_namespace() {
+        let root = std::env::temp_dir().join(format!(
+            "sql-judge-tauri-recovery-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).expect("create test root");
+        let path = root.join("state.sqlite");
+        let state = Mutex::new(load_environment_state(&path).expect("load native state"));
+        let created = create_managed_environment_value(
+            CreateEnvironmentRequest {
+                env_id: "env-a".to_owned(),
+                pack_id: "hr-sql-101".to_owned(),
+                namespace: "sj_env_a".to_owned(),
+            },
+            &state,
+        )
+        .expect("create environment");
+        {
+            let mut state_guard = state.lock().expect("lock native state");
+            let ownership_nonce = state_guard
+                .ledger
+                .inspect("env-a")
+                .expect("created record")
+                .ownership_nonce
+                .clone();
+            state_guard
+                .ledger
+                .begin_rebuild(
+                    "env-a",
+                    DestructiveAction::Reset {
+                        env_id: "env-a".to_owned(),
+                        instance_id: created.instance_id.clone(),
+                        ownership_nonce: ownership_nonce.clone(),
+                        confirmed: true,
+                    },
+                )
+                .expect("begin rebuild");
+            let rebuilding = state_guard
+                .ledger
+                .inspect("env-a")
+                .expect("rebuilding record")
+                .clone();
+            state_guard
+                .store
+                .save_environment(&rebuilding)
+                .expect("save rebuilding state");
+            state_guard
+                .store
+                .save_recovery(&RecoveryRecord {
+                    env_id: "env-a".to_owned(),
+                    operation: RecoveryOperation::Rebuild,
+                    instance_id: created.instance_id,
+                    ownership_nonce,
+                    namespace: "sj_env_a".to_owned(),
+                    replacement_namespace: Some("sj_env_next".to_owned()),
+                })
+                .expect("save recovery intent");
+        }
+        drop(state);
+
+        let mut recovered = load_environment_state(&path).expect("reload native state");
+        ensure_managed_runtime(&mut recovered).expect("reconcile recovery");
+        assert_eq!(
+            recovered.ledger.inspect("env-a").expect("recovered").state,
+            environment_manager::EnvironmentState::Ready
+        );
+        assert!(
+            recovered
+                .store
+                .list_recoveries()
+                .expect("list recoveries")
+                .is_empty()
+        );
+        drop(recovered);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]

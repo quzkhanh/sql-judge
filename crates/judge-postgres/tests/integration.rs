@@ -384,6 +384,11 @@ fn managed_namespace_drop_requires_owned_marker() {
             "CREATE TABLE employees (id integer);",
         )
         .expect("provision namespace");
+    assert!(
+        admin
+            .managed_namespace_is_owned(&environment)
+            .expect("inspect owned namespace")
+    );
 
     let forged = ManagedEnvironment::new("env-a", "instance-a", "sj_env_a", "forged")
         .expect("valid forged shape");
@@ -394,6 +399,11 @@ fn managed_namespace_drop_requires_owned_marker() {
     admin
         .drop_managed_namespace(&environment)
         .expect("drop owned namespace");
+    assert!(
+        !admin
+            .managed_namespace_is_owned(&environment)
+            .expect("inspect removed namespace")
+    );
     assert_eq!(
         admin.execute(
             "SELECT id FROM \"sj_env_a\".employees",

@@ -224,6 +224,32 @@ impl EnvironmentLedger {
         Ok(())
     }
 
+    pub fn recover_rebuild(&mut self, env_id: &str) -> Result<(), LifecycleError> {
+        let record = self
+            .records
+            .get_mut(env_id)
+            .ok_or(LifecycleError::NotFound)?;
+        if !matches!(
+            record.state,
+            EnvironmentState::Rebuilding
+                | EnvironmentState::NeedsRecovery
+                | EnvironmentState::Ready
+                | EnvironmentState::Error
+        ) {
+            return Err(LifecycleError::Ownership(OwnershipError::InvalidState));
+        }
+        record.state = EnvironmentState::Ready;
+        Ok(())
+    }
+
+    pub fn remove_recovered(&mut self, env_id: &str) -> Result<EnvironmentRecord, LifecycleError> {
+        let record = self.records.get(env_id).ok_or(LifecycleError::NotFound)?;
+        if record.state == EnvironmentState::Running {
+            return Err(LifecycleError::Ownership(OwnershipError::InvalidState));
+        }
+        self.records.remove(env_id).ok_or(LifecycleError::NotFound)
+    }
+
     pub fn begin_delete(
         &mut self,
         env_id: &str,

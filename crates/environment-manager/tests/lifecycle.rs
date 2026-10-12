@@ -302,3 +302,32 @@ fn failed_lifecycle_cleanup_marks_environment_error() {
         EnvironmentState::Error
     );
 }
+
+#[test]
+fn recovery_can_restore_rebuild_and_remove_abandoned_operations() {
+    let mut rebuilding = EnvironmentLedger::default();
+    let mut rebuild_record = record("env-rebuild", "sj_rebuild");
+    rebuild_record.state = EnvironmentState::NeedsRecovery;
+    rebuilding
+        .create(rebuild_record)
+        .expect("create rebuild recovery");
+    rebuilding
+        .recover_rebuild("env-rebuild")
+        .expect("restore rebuild");
+    assert_eq!(
+        rebuilding.inspect("env-rebuild").expect("restored").state,
+        EnvironmentState::Ready
+    );
+
+    let mut deleting = EnvironmentLedger::default();
+    let mut record = record("env-delete", "sj_delete");
+    record.state = EnvironmentState::NeedsRecovery;
+    deleting.create(record).expect("create delete recovery");
+    deleting
+        .remove_recovered("env-delete")
+        .expect("remove abandoned operation");
+    assert_eq!(
+        deleting.inspect("env-delete"),
+        Err(LifecycleError::NotFound)
+    );
+}
