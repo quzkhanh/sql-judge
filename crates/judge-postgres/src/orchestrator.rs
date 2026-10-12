@@ -1,4 +1,4 @@
-use crate::{PostgresSession, QueryExecutionError};
+use crate::{CancellationToken, PostgresSession, QueryExecutionError};
 use judge_core::{
     ComparisonMismatch, OutputPolicy, QueryLimits, QueryResult, Verdict, aggregate_verdicts,
     compare_query_results,
@@ -38,7 +38,7 @@ pub fn judge_submission(
     cases: &[JudgeCase<'_>],
     user_sql: &str,
 ) -> SubmissionReport {
-    judge_submission_with_cancel(session, runner_role, cases, user_sql, || false)
+    judge_submission_inner(session, runner_role, cases, user_sql, &|| false, None)
 }
 
 pub fn judge_submission_with_cancel<F>(
@@ -51,6 +51,34 @@ pub fn judge_submission_with_cancel<F>(
 where
     F: Fn() -> bool,
 {
+    judge_submission_inner(session, runner_role, cases, user_sql, &is_cancelled, None)
+}
+
+pub fn judge_submission_with_token(
+    session: &mut PostgresSession,
+    runner_role: &str,
+    cases: &[JudgeCase<'_>],
+    user_sql: &str,
+    token: &CancellationToken,
+) -> SubmissionReport {
+    judge_submission_inner(
+        session,
+        runner_role,
+        cases,
+        user_sql,
+        &|| token.is_cancelled(),
+        Some(token),
+    )
+}
+
+fn judge_submission_inner(
+    session: &mut PostgresSession,
+    runner_role: &str,
+    cases: &[JudgeCase<'_>],
+    user_sql: &str,
+    is_cancelled: &dyn Fn() -> bool,
+    cancellation: Option<&CancellationToken>,
+) -> SubmissionReport {
     let mut tests = Vec::with_capacity(cases.len());
 
     for case in cases {
@@ -65,11 +93,16 @@ where
             case.schema_sql,
             case.fixture_sql,
             |session| {
-                let reference = session.execute(case.reference_sql, case.limits);
-                let user = reference
-                    .as_ref()
-                    .ok()
-                    .map(|_| session.execute(user_sql, case.limits));
+                let reference = match cancellation {
+                    Some(token) => {
+                        session.execute_with_cancel(case.reference_sql, case.limits, token)
+                    }
+                    None => session.execute(case.reference_sql, case.limits),
+                };
+                let user = reference.as_ref().ok().map(|_| match cancellation {
+                    Some(token) => session.execute_with_cancel(user_sql, case.limits, token),
+                    None => session.execute(user_sql, case.limits),
+                });
                 Ok(FixtureExecution { reference, user })
             },
         );
@@ -141,6 +174,7 @@ fn user_error_verdict(error: QueryExecutionError) -> Verdict {
         QueryExecutionError::PolicyViolation => Verdict::PolicyViolation,
         QueryExecutionError::SyntaxError => Verdict::SyntaxError,
         QueryExecutionError::TimeLimitExceeded => Verdict::TimeLimitExceeded,
+        QueryExecutionError::Cancelled => Verdict::Cancelled,
         QueryExecutionError::ResultLimitExceeded => Verdict::ResultLimitExceeded,
         QueryExecutionError::RuntimeError => Verdict::RuntimeError,
         QueryExecutionError::InvalidLimits(_)

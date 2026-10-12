@@ -1,7 +1,7 @@
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, SqlValue, Verdict};
 use judge_postgres::{
-    JudgeCase, ManagedEnvironment, PostgresSession, QueryExecutionError, judge_submission,
-    judge_submission_with_cancel,
+    CancellationToken, JudgeCase, ManagedEnvironment, PostgresSession, QueryExecutionError,
+    judge_submission, judge_submission_with_cancel,
 };
 use std::io::Write;
 use std::net::TcpListener;
@@ -201,6 +201,29 @@ fn session_distinguishes_syntax_timeout_and_result_limits() {
             QueryLimits::new(100, 10, 64 * 1024),
         ),
         Err(QueryExecutionError::TimeLimitExceeded)
+    );
+}
+
+#[test]
+fn session_driver_cancellation_interrupts_an_in_flight_query() {
+    let server = TestServer::start();
+    let session = PostgresSession::connect(&server.connection_string()).expect("connect runner");
+    let token = CancellationToken::default();
+    let worker_token = token.clone();
+    let handle = std::thread::spawn(move || {
+        let mut session = session;
+        session.execute_with_cancel(
+            "SELECT count(*) FROM generate_series(1, 1000000000)",
+            QueryLimits::new(10_000, 10, 64 * 1024),
+            &worker_token,
+        )
+    });
+
+    std::thread::sleep(std::time::Duration::from_millis(100));
+    token.cancel();
+    assert_eq!(
+        handle.join().expect("query worker").unwrap_err(),
+        QueryExecutionError::Cancelled
     );
 }
 

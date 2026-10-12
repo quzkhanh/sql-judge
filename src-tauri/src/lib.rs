@@ -4,15 +4,14 @@ use environment_manager::{
 };
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, Verdict};
 use judge_postgres::{
-    JudgeCase, ManagedEnvironment, ManagedPostgresRuntime, PostgresSession,
-    judge_submission_with_cancel,
+    CancellationToken, JudgeCase, ManagedEnvironment, ManagedPostgresRuntime, PostgresSession,
+    judge_submission_with_token,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, State};
@@ -34,15 +33,15 @@ struct JudgeRunRequest {
     request_id: Option<String>,
 }
 
-static CANCELLATIONS: OnceLock<Mutex<HashMap<String, Arc<AtomicBool>>>> = OnceLock::new();
+static CANCELLATIONS: OnceLock<Mutex<HashMap<String, CancellationToken>>> = OnceLock::new();
 
-fn cancellation_registry() -> &'static Mutex<HashMap<String, Arc<AtomicBool>>> {
+fn cancellation_registry() -> &'static Mutex<HashMap<String, CancellationToken>> {
     CANCELLATIONS.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 struct CancellationRegistration {
     id: Option<String>,
-    token: Arc<AtomicBool>,
+    token: CancellationToken,
 }
 
 impl Drop for CancellationRegistration {
@@ -52,7 +51,7 @@ impl Drop for CancellationRegistration {
         {
             let owns_entry = registry
                 .get(id)
-                .is_some_and(|token| Arc::ptr_eq(token, &self.token));
+                .is_some_and(|token| token.same_instance(&self.token));
             if owns_entry {
                 registry.remove(id);
             }
@@ -61,7 +60,7 @@ impl Drop for CancellationRegistration {
 }
 
 fn register_cancellation(request_id: Option<&str>) -> CancellationRegistration {
-    let token = Arc::new(AtomicBool::new(false));
+    let token = CancellationToken::default();
     let id = request_id
         .map(str::trim)
         .filter(|id| !id.is_empty())
@@ -69,7 +68,7 @@ fn register_cancellation(request_id: Option<&str>) -> CancellationRegistration {
     if let Some(id) = &id
         && let Ok(mut registry) = cancellation_registry().lock()
     {
-        registry.insert(id.clone(), Arc::clone(&token));
+        registry.insert(id.clone(), token.clone());
     }
     CancellationRegistration { id, token }
 }
@@ -80,7 +79,7 @@ fn cancel_judge_value(request_id: &str) -> bool {
         .ok()
         .and_then(|registry| registry.get(request_id).cloned())
         .is_some_and(|token| {
-            token.store(true, Ordering::Release);
+            token.cancel();
             true
         })
 }
@@ -728,7 +727,7 @@ fn judge_request(
         return policy_error("The requested problem or judge mode is not available.");
     }
     let cancellation = register_cancellation(request.request_id.as_deref());
-    let cancellation_token = Arc::clone(&cancellation.token);
+    let cancellation_token = cancellation.token.clone();
     let started = Instant::now();
     let mut state = match state.lock() {
         Ok(state) => state,
@@ -779,12 +778,12 @@ fn judge_request(
             };
         }
     };
-    let report = judge_submission_with_cancel(
+    let report = judge_submission_with_token(
         &mut session,
         "sqljudge_runner",
         &judge_cases(expected_mode == "submit"),
         &request.sql,
-        move || cancellation_token.load(Ordering::Acquire),
+        &cancellation_token,
     );
     let duration_ms = started.elapsed().as_millis() as u64;
     let verdict = verdict_name(report.verdict).to_owned();
@@ -1055,13 +1054,12 @@ mod tests {
         register_cancellation, reset_managed_environment_value, unavailable_judge, verdict_name,
     };
     use std::sync::Mutex;
-    use std::sync::atomic::Ordering;
 
     #[test]
     fn native_judge_cancellation_registry_is_scoped_to_request_id() {
         let registration = register_cancellation(Some("request-1"));
         assert!(cancel_judge_value("request-1"));
-        assert!(registration.token.load(Ordering::Acquire));
+        assert!(registration.token.is_cancelled());
         drop(registration);
         assert!(!cancel_judge_value("request-1"));
     }

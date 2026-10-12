@@ -4,7 +4,10 @@ use postgres::{
     Client, NoTls, Row,
     types::{ToSql, Type},
 };
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 mod orchestrator;
@@ -12,6 +15,7 @@ mod runtime;
 
 pub use orchestrator::{
     JudgeCase, SubmissionReport, TestOutcome, judge_submission, judge_submission_with_cancel,
+    judge_submission_with_token,
 };
 pub use runtime::ManagedPostgresRuntime;
 
@@ -25,6 +29,8 @@ pub enum QueryExecutionError {
     SyntaxError,
     #[error("query exceeded its statement deadline")]
     TimeLimitExceeded,
+    #[error("query was cancelled")]
+    Cancelled,
     #[error("query exceeded the result limit")]
     ResultLimitExceeded,
     #[error("database execution failed")]
@@ -35,6 +41,61 @@ pub enum QueryExecutionError {
     ConnectionError,
     #[error("managed namespace ownership marker does not match")]
     OwnershipVerificationFailed,
+}
+
+#[derive(Clone, Default)]
+pub struct CancellationToken {
+    cancelled: Arc<AtomicBool>,
+}
+
+impl CancellationToken {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.cancelled.load(Ordering::Acquire)
+    }
+
+    pub fn same_instance(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.cancelled, &other.cancelled)
+    }
+}
+
+struct CancellationWatcher {
+    stop: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
+impl CancellationWatcher {
+    fn start(token: &CancellationToken, client: &Client) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let watcher_stop = Arc::clone(&stop);
+        let cancellation = token.clone();
+        let cancel_token = client.cancel_token();
+        let handle = thread::spawn(move || {
+            while !watcher_stop.load(Ordering::Acquire) {
+                if cancellation.is_cancelled() {
+                    let _ = cancel_token.cancel_query(NoTls);
+                    break;
+                }
+                thread::sleep(Duration::from_millis(5));
+            }
+        });
+        Self {
+            stop,
+            handle: Some(handle),
+        }
+    }
+}
+
+impl Drop for CancellationWatcher {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(handle) = self.handle.take() {
+            let _ = handle.join();
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -145,6 +206,15 @@ impl ManagedPostgresSession {
         self.session.execute(sql, limits)
     }
 
+    pub fn execute_with_cancel(
+        &mut self,
+        sql: &str,
+        limits: QueryLimits,
+        token: &CancellationToken,
+    ) -> Result<QueryResult, QueryExecutionError> {
+        self.session.execute_with_cancel(sql, limits, token)
+    }
+
     pub fn provision_managed_namespace_with_schema(
         &mut self,
         environment: &ManagedEnvironment,
@@ -171,6 +241,27 @@ impl PostgresSession {
         sql: &str,
         limits: QueryLimits,
     ) -> Result<QueryResult, QueryExecutionError> {
+        self.execute_inner(sql, limits, None)
+    }
+
+    pub fn execute_with_cancel(
+        &mut self,
+        sql: &str,
+        limits: QueryLimits,
+        token: &CancellationToken,
+    ) -> Result<QueryResult, QueryExecutionError> {
+        self.execute_inner(sql, limits, Some(token))
+    }
+
+    fn execute_inner(
+        &mut self,
+        sql: &str,
+        limits: QueryLimits,
+        cancellation: Option<&CancellationToken>,
+    ) -> Result<QueryResult, QueryExecutionError> {
+        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(QueryExecutionError::RuntimeError);
+        }
         limits
             .validate()
             .map_err(|error| QueryExecutionError::InvalidLimits(error.to_string()))?;
@@ -192,15 +283,19 @@ impl PostgresSession {
                     .map(|logical_type| Column::new(column.name(), logical_type))
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let _watcher = cancellation.map(|token| CancellationWatcher::start(token, &self.client));
         let mut rows = self
             .client
             .query_raw(&statement, std::iter::empty::<&(dyn ToSql + Sync)>())
-            .map_err(map_database_error)?;
+            .map_err(|error| map_cancellable_error(error, cancellation))?;
         let mut values = Vec::with_capacity(limits.max_rows as usize);
         let mut result_bytes = 0_u32;
         let mut row_count = 0_usize;
 
-        while let Some(row) = rows.next().map_err(map_database_error)? {
+        while let Some(row) = rows
+            .next()
+            .map_err(|error| map_cancellable_error(error, cancellation))?
+        {
             if row_count >= limits.max_rows as usize {
                 return Err(QueryExecutionError::ResultLimitExceeded);
             }
@@ -957,4 +1052,15 @@ fn map_database_error(error: postgres::Error) -> QueryExecutionError {
         }
     }
     QueryExecutionError::RuntimeError
+}
+
+fn map_cancellable_error(
+    error: postgres::Error,
+    cancellation: Option<&CancellationToken>,
+) -> QueryExecutionError {
+    if cancellation.is_some_and(CancellationToken::is_cancelled) {
+        QueryExecutionError::Cancelled
+    } else {
+        map_database_error(error)
+    }
 }
