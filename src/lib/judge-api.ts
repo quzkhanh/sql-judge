@@ -73,6 +73,17 @@ export type DeleteManagedEnvironmentRequest = {
   confirmed: boolean
 }
 
+export type SubmissionHistorySummary = {
+  submissionId: string
+  packId: string
+  packVersion: string
+  packHash: string
+  engineVersion: string
+  policyVersion: string
+  verdict: string
+  createdAt: string
+}
+
 export async function runJudge(
   request: JudgeRunRequest
 ): Promise<JudgeRunResult> {
@@ -177,6 +188,16 @@ export async function deleteManagedEnvironment(
   }
 
   await trackedInvoke<void>("delete_managed_environment", request)
+}
+
+export async function listSubmissionHistory(): Promise<
+  SubmissionHistorySummary[]
+> {
+  if (!isTauri()) {
+    return []
+  }
+
+  return trackedInvoke<SubmissionHistorySummary[]>("list_submission_history")
 }
 
 export async function getManagedRuntimeStatus(): Promise<ManagedRuntimeStatus> {

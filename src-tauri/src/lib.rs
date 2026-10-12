@@ -119,6 +119,19 @@ struct ManagedEnvironmentSummary {
     state: String,
 }
 
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmissionHistorySummary {
+    submission_id: String,
+    pack_id: String,
+    pack_version: String,
+    pack_hash: String,
+    engine_version: String,
+    policy_version: String,
+    verdict: String,
+    created_at: String,
+}
+
 fn load_environment_state(path: &Path) -> Result<ManagedEnvironmentState, String> {
     let mut store = EnvironmentStore::open(path)
         .map_err(|_| "Managed environment state could not be opened.".to_owned())?;
@@ -807,6 +820,34 @@ fn inspect_managed_environment(
 }
 
 #[tauri::command]
+fn list_submission_history(
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> Result<Vec<SubmissionHistorySummary>, String> {
+    let state = state
+        .lock()
+        .map_err(|_| "Managed environment state is busy.".to_owned())?;
+    state
+        .history
+        .list_submissions()
+        .map(|records| {
+            records
+                .into_iter()
+                .map(|record| SubmissionHistorySummary {
+                    submission_id: record.submission_id,
+                    pack_id: record.pack_id,
+                    pack_version: record.pack_version,
+                    pack_hash: record.pack_hash,
+                    engine_version: record.engine_version,
+                    policy_version: record.policy_version,
+                    verdict: record.verdict,
+                    created_at: record.created_at,
+                })
+                .collect()
+        })
+        .map_err(|_| "Submission history could not be read.".to_owned())
+}
+
+#[tauri::command]
 fn create_managed_environment(
     request: CreateEnvironmentRequest,
     state: State<'_, Mutex<ManagedEnvironmentState>>,
@@ -924,6 +965,7 @@ pub fn run() {
             clone_managed_environment,
             reset_managed_environment,
             delete_managed_environment,
+            list_submission_history,
             managed_runtime_status,
             start_managed_runtime
         ])

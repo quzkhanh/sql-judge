@@ -27,12 +27,14 @@ import {
   createManagedEnvironment,
   deleteManagedEnvironment,
   listManagedEnvironments,
+  listSubmissionHistory,
   resetManagedEnvironment,
   runJudge,
   startManagedRuntime,
   type JudgeRunResult,
   type ManagedEnvironmentSummary,
   type ManagedRuntimeStatus,
+  type SubmissionHistorySummary,
 } from "@/lib/judge-api"
 import {
   filterProblems,
@@ -68,6 +70,7 @@ export function LearningWorkspace() {
   const [environmentMessage, setEnvironmentMessage] = useState<string | null>(
     null
   )
+  const [history, setHistory] = useState<SubmissionHistorySummary[]>([])
 
   useEffect(() => {
     let active = true
@@ -87,6 +90,22 @@ export function LearningWorkspace() {
           })
         }
       })
+
+    return () => {
+      active = false
+    }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+
+    void listSubmissionHistory()
+      .then((records) => {
+        if (active) {
+          setHistory(records)
+        }
+      })
+      .catch(() => undefined)
 
     return () => {
       active = false
@@ -127,13 +146,15 @@ export function LearningWorkspace() {
     setBusy(true)
     setResult(null)
     try {
-      setResult(
-        await runJudge({
-          problemId: selectedProblem.id,
-          sql: draft,
-          mode,
-        })
-      )
+      const nextResult = await runJudge({
+        problemId: selectedProblem.id,
+        sql: draft,
+        mode,
+      })
+      setResult(nextResult)
+      if (mode === "submit") {
+        setHistory(await listSubmissionHistory())
+      }
     } catch {
       setResult({
         status: "error",
@@ -548,6 +569,47 @@ export function LearningWorkspace() {
               <p className="mt-2 text-sm leading-6">
                 {selectedProblem.statement}
               </p>
+            </section>
+            <section
+              aria-labelledby="history-heading"
+              className="rounded-lg border bg-muted/20 p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3
+                  id="history-heading"
+                  className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+                >
+                  Recent submissions
+                </h3>
+                <Badge variant="secondary">{history.length}</Badge>
+              </div>
+              {history.length > 0 ? (
+                <div className="mt-2 space-y-1.5">
+                  {history.slice(0, 3).map((submission) => (
+                    <div
+                      key={submission.submissionId}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <span className="truncate text-muted-foreground">
+                        {submission.createdAt}
+                      </span>
+                      <Badge
+                        variant={
+                          submission.verdict === "Accepted"
+                            ? "default"
+                            : "outline"
+                        }
+                      >
+                        {submission.verdict}
+                      </Badge>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  No submissions yet.
+                </p>
+              )}
             </section>
             <section aria-labelledby="schema-heading">
               <h3
