@@ -1,6 +1,7 @@
 use environment_manager::{EnvironmentMode, EnvironmentRecord, EnvironmentState};
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -69,9 +70,40 @@ impl EnvironmentStore {
                      'deleting', 'needs_recovery', 'error'
                  ))
              );
-             CREATE INDEX IF NOT EXISTS idx_environment_pack ON environment_ledger(pack_id);",
+             CREATE INDEX IF NOT EXISTS idx_environment_pack ON environment_ledger(pack_id);
+             CREATE TABLE IF NOT EXISTS runtime_metadata (
+                 metadata_key TEXT PRIMARY KEY NOT NULL,
+                 metadata_value TEXT NOT NULL
+             );",
         )?;
         Ok(Self { connection })
+    }
+
+    pub fn get_or_create_runtime_instance_id(&mut self) -> Result<String, StorageError> {
+        let generated = format!(
+            "runtime-{}-{}",
+            std::process::id(),
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos())
+        );
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO runtime_metadata (metadata_key, metadata_value)
+             VALUES ('runtime_instance_id', ?1)",
+            [&generated],
+        )?;
+        let instance_id = transaction.query_row(
+            "SELECT metadata_value FROM runtime_metadata
+             WHERE metadata_key = 'runtime_instance_id'",
+            [],
+            |row| row.get::<_, String>(0),
+        )?;
+        transaction.commit()?;
+        if instance_id.trim().is_empty() {
+            return Err(StorageError::InvalidEnvironment("runtime instance id"));
+        }
+        Ok(instance_id)
     }
 
     pub fn save_environment(

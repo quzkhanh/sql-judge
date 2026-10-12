@@ -56,6 +56,31 @@ fn history_survives_store_reopen_without_credentials() {
 }
 
 #[test]
+fn runtime_instance_id_survives_store_reopen() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-runtime-id-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let first = {
+        let mut store = EnvironmentStore::open(&path).expect("open store");
+        store
+            .get_or_create_runtime_instance_id()
+            .expect("create runtime identity")
+    };
+    let second = {
+        let mut store = EnvironmentStore::open(&path).expect("reopen store");
+        store
+            .get_or_create_runtime_instance_id()
+            .expect("restore runtime identity")
+    };
+
+    assert_eq!(first, second);
+    assert!(first.starts_with("runtime-"));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn failed_submission_write_rolls_back_all_test_rows() {
     let path = std::env::temp_dir().join(format!(
         "sql-judge-history-rollback-{}.sqlite",
