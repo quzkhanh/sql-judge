@@ -1,13 +1,11 @@
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import {
   CheckCircle2,
   Database,
   Filter,
   Play,
-  RefreshCw,
   Send,
   Table2,
-  Trash2,
   XCircle,
 } from "lucide-react"
 
@@ -24,19 +22,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import {
-  getManagedRuntimeStatus,
   cancelJudge,
-  createManagedEnvironment,
-  deleteManagedEnvironment,
-  listManagedEnvironments,
-  listSubmissionHistory,
-  resetManagedEnvironment,
   runJudge,
-  startManagedRuntime,
   type JudgeRunResult,
-  type ManagedEnvironmentSummary,
-  type ManagedRuntimeStatus,
-  type SubmissionHistorySummary,
 } from "@/lib/judge-api"
 import {
   filterProblems,
@@ -61,79 +49,6 @@ export function LearningWorkspace() {
   const [result, setResult] = useState<JudgeRunResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
-  const [runtimeStatus, setRuntimeStatus] =
-    useState<ManagedRuntimeStatus | null>(null)
-  const [runtimeBusy, setRuntimeBusy] = useState(false)
-  const [environments, setEnvironments] = useState<ManagedEnvironmentSummary[]>(
-    []
-  )
-  const [environmentNamespace, setEnvironmentNamespace] =
-    useState("sj_practice")
-  const [environmentBusy, setEnvironmentBusy] = useState(false)
-  const [environmentMessage, setEnvironmentMessage] = useState<string | null>(
-    null
-  )
-  const [history, setHistory] = useState<SubmissionHistorySummary[]>([])
-
-  useEffect(() => {
-    let active = true
-
-    void getManagedRuntimeStatus()
-      .then((status) => {
-        if (active) {
-          setRuntimeStatus(status)
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setRuntimeStatus({
-            available: false,
-            state: "unavailable",
-            message: "The managed PostgreSQL runtime status could not be read.",
-          })
-        }
-      })
-
-    return () => {
-      active = false
-    }
-  }, [])
-
-  useEffect(() => {
-    let active = true
-
-    void listSubmissionHistory()
-      .then((records) => {
-        if (active) {
-          setHistory(records)
-        }
-      })
-      .catch(() => undefined)
-
-    return () => {
-      active = false
-    }
-  }, [])
-
-  useEffect(() => {
-    let active = true
-
-    void listManagedEnvironments()
-      .then((records) => {
-        if (active) {
-          setEnvironments(records)
-        }
-      })
-      .catch(() => {
-        if (active) {
-          setEnvironmentMessage("Managed environments could not be loaded.")
-        }
-      })
-
-    return () => {
-      active = false
-    }
-  }, [])
 
   const filteredProblems = useMemo(
     () => filterProblems(learningProblems, query, dialect, difficulty),
@@ -158,9 +73,6 @@ export function LearningWorkspace() {
         requestId,
       })
       setResult(nextResult)
-      if (mode === "submit") {
-        setHistory(await listSubmissionHistory())
-      }
     } catch {
       setResult({
         status: "error",
@@ -180,99 +92,6 @@ export function LearningWorkspace() {
     }
   }
 
-  async function startRuntime() {
-    setRuntimeBusy(true)
-    try {
-      setRuntimeStatus(await startManagedRuntime())
-    } catch {
-      setRuntimeStatus({
-        available: false,
-        state: "unavailable",
-        message: "The managed PostgreSQL runtime could not be started.",
-      })
-    } finally {
-      setRuntimeBusy(false)
-    }
-  }
-
-  async function refreshEnvironments() {
-    setEnvironmentBusy(true)
-    try {
-      setEnvironments(await listManagedEnvironments())
-      setEnvironmentMessage(null)
-    } catch {
-      setEnvironmentMessage("Managed environments could not be loaded.")
-    } finally {
-      setEnvironmentBusy(false)
-    }
-  }
-
-  async function createPracticeEnvironment() {
-    setEnvironmentBusy(true)
-    try {
-      await createManagedEnvironment({
-        envId: "practice",
-        packId: "hr-sql-101",
-        namespace: environmentNamespace,
-      })
-      await refreshEnvironments()
-      setEnvironmentMessage("Practice environment is ready.")
-    } catch {
-      setEnvironmentMessage("Practice environment could not be provisioned.")
-    } finally {
-      setEnvironmentBusy(false)
-    }
-  }
-
-  async function resetEnvironment(environment: ManagedEnvironmentSummary) {
-    const namespace = environmentNamespace.trim()
-    if (
-      !namespace ||
-      !window.confirm(`Replace ${environment.namespace} with ${namespace}?`)
-    ) {
-      return
-    }
-    setEnvironmentBusy(true)
-    try {
-      await resetManagedEnvironment({
-        envId: environment.envId,
-        instanceId: environment.instanceId,
-        namespace,
-        confirmed: true,
-      })
-      await refreshEnvironments()
-      setEnvironmentMessage("Environment rebuilt and old schema cleaned up.")
-    } catch {
-      setEnvironmentMessage("Environment rebuild failed closed.")
-    } finally {
-      setEnvironmentBusy(false)
-    }
-  }
-
-  async function deleteEnvironment(environment: ManagedEnvironmentSummary) {
-    if (
-      !window.confirm(
-        `Delete ${environment.envId} and schema ${environment.namespace}? This cannot be undone.`
-      )
-    ) {
-      return
-    }
-    setEnvironmentBusy(true)
-    try {
-      await deleteManagedEnvironment({
-        envId: environment.envId,
-        instanceId: environment.instanceId,
-        confirmed: true,
-      })
-      await refreshEnvironments()
-      setEnvironmentMessage("Environment deleted.")
-    } catch {
-      setEnvironmentMessage("Environment deletion failed closed.")
-    } finally {
-      setEnvironmentBusy(false)
-    }
-  }
-
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4 p-4 lg:p-6">
       <header className="flex flex-col gap-3 border-b pb-4 lg:flex-row lg:items-end lg:justify-between">
@@ -288,33 +107,9 @@ export function LearningWorkspace() {
             result for judging.
           </p>
         </div>
-        <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
-          <span
-            className={cn(
-              "size-2 rounded-full",
-              runtimeStatus?.available ? "bg-emerald-500" : "bg-amber-500"
-            )}
-            aria-hidden="true"
-          />
-          <span>
-            {runtimeStatus?.available
-              ? "Native runner ready"
-              : (runtimeStatus?.message ?? "Checking native runner...")}
-          </span>
-          {runtimeStatus && !runtimeStatus.available ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void startRuntime()}
-              disabled={runtimeBusy}
-            >
-              {runtimeBusy ? "Starting..." : "Start runtime"}
-            </Button>
-          ) : null}
-        </div>
       </header>
 
-      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_300px]">
+      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_300px]">
         <Card className="min-h-0 xl:flex">
           <CardHeader className="gap-3 border-b">
             <div className="flex items-center justify-between">
@@ -468,120 +263,10 @@ export function LearningWorkspace() {
         <Card className="min-h-0 overflow-y-auto">
           <CardHeader className="border-b">
             <CardTitle className="flex items-center gap-2 text-sm">
-              <Table2 className="size-4" /> Schema & prompt
+              <Table2 className="size-4" /> Problem context
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5 p-4">
-            <section
-              aria-labelledby="environment-heading"
-              className="rounded-lg border bg-muted/20 p-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <div>
-                  <h3
-                    id="environment-heading"
-                    className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
-                  >
-                    Managed environments
-                  </h3>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Owned schemas only. External connections never appear here.
-                  </p>
-                </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => void refreshEnvironments()}
-                  disabled={environmentBusy}
-                  aria-label="Refresh managed environments"
-                >
-                  <RefreshCw
-                    className={cn("size-4", environmentBusy && "animate-spin")}
-                  />
-                </Button>
-              </div>
-              <div className="mt-3 flex gap-2">
-                <Input
-                  value={environmentNamespace}
-                  onChange={(event) =>
-                    setEnvironmentNamespace(event.target.value)
-                  }
-                  aria-label="Managed environment namespace"
-                  placeholder="sj_practice"
-                  className="h-8 font-mono text-xs"
-                />
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void createPracticeEnvironment()}
-                  disabled={environmentBusy}
-                >
-                  Create
-                </Button>
-              </div>
-              {environments.length > 0 ? (
-                <div className="mt-3 space-y-2">
-                  {environments.map((environment) => (
-                    <div
-                      key={environment.envId}
-                      className="rounded-md border bg-background p-2"
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="min-w-0">
-                          <p className="truncate font-mono text-xs font-semibold">
-                            {environment.namespace}
-                          </p>
-                          <p className="mt-1 text-[11px] text-muted-foreground">
-                            {environment.envId} · {environment.state}
-                          </p>
-                        </div>
-                        <Badge
-                          variant={
-                            environment.state === "ready"
-                              ? "secondary"
-                              : "outline"
-                          }
-                        >
-                          {environment.state}
-                        </Badge>
-                      </div>
-                      <div className="mt-2 flex justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => void resetEnvironment(environment)}
-                          disabled={
-                            environmentBusy || environment.state !== "ready"
-                          }
-                        >
-                          Reset
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => void deleteEnvironment(environment)}
-                          disabled={
-                            environmentBusy || environment.state !== "ready"
-                          }
-                          aria-label={`Delete ${environment.namespace}`}
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  No managed environment yet.
-                </p>
-              )}
-              {environmentMessage ? (
-                <p className="mt-2 text-xs text-muted-foreground" role="status">
-                  {environmentMessage}
-                </p>
-              ) : null}
-            </section>
             <section aria-labelledby="statement-heading">
               <h3
                 id="statement-heading"
@@ -592,47 +277,6 @@ export function LearningWorkspace() {
               <p className="mt-2 text-sm leading-6">
                 {selectedProblem.statement}
               </p>
-            </section>
-            <section
-              aria-labelledby="history-heading"
-              className="rounded-lg border bg-muted/20 p-3"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <h3
-                  id="history-heading"
-                  className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
-                >
-                  Recent submissions
-                </h3>
-                <Badge variant="secondary">{history.length}</Badge>
-              </div>
-              {history.length > 0 ? (
-                <div className="mt-2 space-y-1.5">
-                  {history.slice(0, 3).map((submission) => (
-                    <div
-                      key={submission.submissionId}
-                      className="flex items-center justify-between gap-2 text-xs"
-                    >
-                      <span className="truncate text-muted-foreground">
-                        {submission.createdAt}
-                      </span>
-                      <Badge
-                        variant={
-                          submission.verdict === "Accepted"
-                            ? "default"
-                            : "outline"
-                        }
-                      >
-                        {submission.verdict}
-                      </Badge>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  No submissions yet.
-                </p>
-              )}
             </section>
             <section aria-labelledby="schema-heading">
               <h3

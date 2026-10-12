@@ -1,179 +1,54 @@
 import * as React from "react"
+import {
+  BarChart3,
+  BookOpen,
+  Cable,
+  ChartNoAxesColumn,
+  Command,
+  Database,
+  FolderOpen,
+  History,
+  LayoutDashboard,
+} from "lucide-react"
 
-import { NavDocuments } from "@/components/nav-documents"
-import { NavMain } from "@/components/nav-main"
-import { NavSecondary } from "@/components/nav-secondary"
-import { NavUser } from "@/components/nav-user"
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
-import { LayoutDashboardIcon, ListIcon, ChartBarIcon, FolderIcon, UsersIcon, CameraIcon, FileTextIcon, Settings2Icon, CircleHelpIcon, SearchIcon, DatabaseIcon, FileChartColumnIcon, FileIcon, CommandIcon } from "lucide-react"
 
-const data = {
-  user: {
-      name: "SQL learner",
-      email: "local workspace",
-    avatar: "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 96 96'%3E%3Crect width='96' height='96' rx='24' fill='%23181f2a'/%3E%3Ccircle cx='48' cy='34' r='18' fill='%23f8fafc'/%3E%3Cpath d='M18 82c6-14 18-22 30-22s24 8 30 22' fill='%23f8fafc'/%3E%3C/svg%3E",
-  },
-  navMain: [
-    {
-      title: "Practice",
-      url: "#",
-      icon: (
-        <LayoutDashboardIcon
-        />
-      ),
-    },
-    {
-      title: "History",
-      url: "#",
-      icon: (
-        <ListIcon
-        />
-      ),
-    },
-    {
-      title: "Progress",
-      url: "#",
-      icon: (
-        <ChartBarIcon
-        />
-      ),
-    },
-    {
-      title: "Packs",
-      url: "#",
-      icon: (
-        <FolderIcon
-        />
-      ),
-    },
-    {
-      title: "Connections",
-      url: "#",
-      icon: (
-        <UsersIcon
-        />
-      ),
-    },
-  ],
-  navClouds: [
-    {
-      title: "Capture",
-      icon: (
-        <CameraIcon
-        />
-      ),
-      isActive: true,
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
-    },
-    {
-      title: "Proposal",
-      icon: (
-        <FileTextIcon
-        />
-      ),
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
-    },
-    {
-      title: "Prompts",
-      icon: (
-        <FileTextIcon
-        />
-      ),
-      url: "#",
-      items: [
-        {
-          title: "Active Proposals",
-          url: "#",
-        },
-        {
-          title: "Archived",
-          url: "#",
-        },
-      ],
-    },
-  ],
-  navSecondary: [
-    {
-      title: "Settings",
-      url: "#",
-      icon: (
-        <Settings2Icon
-        />
-      ),
-    },
-    {
-      title: "Get Help",
-      url: "#",
-      icon: (
-        <CircleHelpIcon
-        />
-      ),
-    },
-    {
-      title: "Search",
-      url: "#",
-      icon: (
-        <SearchIcon
-        />
-      ),
-    },
-  ],
-  documents: [
-    {
-      name: "Data Library",
-      url: "#",
-      icon: (
-        <DatabaseIcon
-        />
-      ),
-    },
-    {
-      name: "Reports",
-      url: "#",
-      icon: (
-        <FileChartColumnIcon
-        />
-      ),
-    },
-    {
-      name: "Word Assistant",
-      url: "#",
-      icon: (
-        <FileIcon
-        />
-      ),
-    },
-  ],
-}
-export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+export type AppRoute =
+  | "practice"
+  | "environments"
+  | "history"
+  | "progress"
+  | "packs"
+  | "connections"
+
+const navigation: Array<{
+  route: AppRoute
+  label: string
+  icon: typeof LayoutDashboard
+}> = [
+  { route: "practice", label: "Practice", icon: LayoutDashboard },
+  { route: "environments", label: "Environments", icon: Database },
+  { route: "history", label: "History", icon: History },
+  { route: "progress", label: "Progress", icon: BarChart3 },
+  { route: "packs", label: "Packs", icon: FolderOpen },
+  { route: "connections", label: "Connections", icon: Cable },
+]
+
+export function AppSidebar({
+  activeRoute,
+  ...props
+}: React.ComponentProps<typeof Sidebar> & { activeRoute: AppRoute }) {
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
@@ -181,21 +56,61 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
           <SidebarMenuItem>
             <SidebarMenuButton
               className="data-[slot=sidebar-menu-button]:p-1.5!"
-              render={<a href="#" />}
+              render={<a href="#practice" />}
+              isActive={activeRoute === "practice"}
             >
-              <CommandIcon className="size-5!" />
+              <Command className="size-5!" />
               <span className="text-base font-semibold">SQL Judge</span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
-        <NavMain items={data.navMain} />
-        <NavDocuments items={data.documents} />
-        <NavSecondary items={data.navSecondary} className="mt-auto" />
+        <SidebarGroup>
+          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {navigation.map((item) => {
+                const Icon = item.icon
+                return (
+                  <SidebarMenuItem key={item.route}>
+                    <SidebarMenuButton
+                      render={<a href={`#${item.route}`} />}
+                      isActive={activeRoute === item.route}
+                      tooltip={item.label}
+                    >
+                      <Icon />
+                      <span>{item.label}</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupLabel>Local workspace</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <div className="rounded-lg border border-sidebar-border/70 bg-sidebar-accent/40 p-3 text-xs text-sidebar-foreground/70">
+              <div className="flex items-center gap-2 font-medium text-sidebar-foreground">
+                <BookOpen className="size-3.5" />
+                Offline-first
+              </div>
+              <p className="mt-1 leading-5">
+                Practice content and managed PostgreSQL stay on this device.
+              </p>
+            </div>
+          </SidebarGroupContent>
+        </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <NavUser user={data.user} />
+        <div className="flex items-center gap-2 rounded-lg border border-sidebar-border/70 p-2 text-xs">
+          <ChartNoAxesColumn className="size-4 text-sidebar-foreground/60" />
+          <div className="min-w-0">
+            <p className="truncate font-medium">SQL learner</p>
+            <p className="truncate text-sidebar-foreground/60">Local workspace</p>
+          </div>
+        </div>
       </SidebarFooter>
     </Sidebar>
   )
