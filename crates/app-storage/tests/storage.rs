@@ -81,6 +81,30 @@ fn runtime_instance_id_survives_store_reopen() {
 }
 
 #[test]
+fn environment_store_can_remove_deleted_environment() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-environment-delete-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut store = EnvironmentStore::open(&path).expect("open store");
+    store
+        .save_environment(&environment("env-delete", EnvironmentState::Deleting))
+        .expect("save deleting environment");
+
+    store
+        .delete_environment("env-delete")
+        .expect("delete environment");
+    assert!(
+        store
+            .get_environment("env-delete")
+            .expect("read deleted")
+            .is_none()
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
 fn failed_submission_write_rolls_back_all_test_rows() {
     let path = std::env::temp_dir().join(format!(
         "sql-judge-history-rollback-{}.sqlite",

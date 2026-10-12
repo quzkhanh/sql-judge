@@ -164,6 +164,18 @@ impl EnvironmentStore {
         row.map(decode_environment).transpose()
     }
 
+    pub fn delete_environment(&mut self, env_id: &str) -> Result<(), StorageError> {
+        if env_id.trim().is_empty() {
+            return Err(StorageError::InvalidEnvironment(
+                "environment id must be non-empty",
+            ));
+        }
+        let transaction = self.connection.transaction()?;
+        transaction.execute("DELETE FROM environment_ledger WHERE env_id = ?1", [env_id])?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     pub fn list_environments(&self) -> Result<Vec<EnvironmentRecord>, StorageError> {
         let mut statement = self.connection.prepare(
             "SELECT env_id, instance_id, pack_id, namespace, ownership_nonce, mode, state
