@@ -42,6 +42,12 @@ export type ManagedEnvironmentSummary = {
     | "error"
 }
 
+export type ManagedRuntimeStatus = {
+  available: boolean
+  state: "running" | "unavailable"
+  message: string
+}
+
 export async function runJudge(
   request: JudgeRunRequest
 ): Promise<JudgeRunResult> {
@@ -81,4 +87,30 @@ export async function inspectManagedEnvironment(
     "inspect_managed_environment",
     { envId }
   )
+}
+
+export async function getManagedRuntimeStatus(): Promise<ManagedRuntimeStatus> {
+  if (!isTauri()) {
+    return {
+      available: false,
+      state: "unavailable",
+      message:
+        "The managed PostgreSQL runtime is unavailable in browser preview mode.",
+    }
+  }
+
+  return trackedInvoke<ManagedRuntimeStatus>("managed_runtime_status")
+}
+
+export async function startManagedRuntime(): Promise<ManagedRuntimeStatus> {
+  if (!isTauri()) {
+    return {
+      available: false,
+      state: "unavailable",
+      message:
+        "The managed PostgreSQL runtime can only start in the desktop app.",
+    }
+  }
+
+  return trackedInvoke<ManagedRuntimeStatus>("start_managed_runtime")
 }

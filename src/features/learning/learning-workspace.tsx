@@ -1,5 +1,12 @@
-import { useMemo, useState } from "react"
-import { CheckCircle2, Database, Filter, Play, Send, Table2 } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
+import {
+  CheckCircle2,
+  Database,
+  Filter,
+  Play,
+  Send,
+  Table2,
+} from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -13,7 +20,13 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
-import { runJudge, type JudgeRunResult } from "@/lib/judge-api"
+import {
+  getManagedRuntimeStatus,
+  runJudge,
+  startManagedRuntime,
+  type JudgeRunResult,
+  type ManagedRuntimeStatus,
+} from "@/lib/judge-api"
 import {
   filterProblems,
   learningProblems,
@@ -36,6 +49,33 @@ export function LearningWorkspace() {
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [result, setResult] = useState<JudgeRunResult | null>(null)
   const [busy, setBusy] = useState(false)
+  const [runtimeStatus, setRuntimeStatus] =
+    useState<ManagedRuntimeStatus | null>(null)
+  const [runtimeBusy, setRuntimeBusy] = useState(false)
+
+  useEffect(() => {
+    let active = true
+
+    void getManagedRuntimeStatus()
+      .then((status) => {
+        if (active) {
+          setRuntimeStatus(status)
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setRuntimeStatus({
+            available: false,
+            state: "unavailable",
+            message: "The managed PostgreSQL runtime status could not be read.",
+          })
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   const filteredProblems = useMemo(
     () => filterProblems(learningProblems, query, dialect, difficulty),
@@ -62,10 +102,26 @@ export function LearningWorkspace() {
       setResult({
         status: "error",
         durationMs: 0,
-        message: "The native judge returned an unavailable or malformed response.",
+        message:
+          "The native judge returned an unavailable or malformed response.",
       })
     } finally {
       setBusy(false)
+    }
+  }
+
+  async function startRuntime() {
+    setRuntimeBusy(true)
+    try {
+      setRuntimeStatus(await startManagedRuntime())
+    } catch {
+      setRuntimeStatus({
+        available: false,
+        state: "unavailable",
+        message: "The managed PostgreSQL runtime could not be started.",
+      })
+    } finally {
+      setRuntimeBusy(false)
     }
   }
 
@@ -76,14 +132,37 @@ export function LearningWorkspace() {
           <p className="text-xs font-semibold tracking-[0.18em] text-primary uppercase">
             Practice room
           </p>
-          <h2 className="mt-1 text-2xl font-semibold tracking-tight">SQL Judge</h2>
+          <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+            SQL Judge
+          </h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Work against clean fixtures, inspect the schema, then submit a typed result for judging.
+            Work against clean fixtures, inspect the schema, then submit a typed
+            result for judging.
           </p>
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span className="size-2 rounded-full bg-amber-500" aria-hidden="true" />
-          Native runner not connected
+        <div className="flex flex-wrap items-center justify-end gap-2 text-xs text-muted-foreground">
+          <span
+            className={cn(
+              "size-2 rounded-full",
+              runtimeStatus?.available ? "bg-emerald-500" : "bg-amber-500"
+            )}
+            aria-hidden="true"
+          />
+          <span>
+            {runtimeStatus?.available
+              ? "Native runner ready"
+              : (runtimeStatus?.message ?? "Checking native runner...")}
+          </span>
+          {runtimeStatus && !runtimeStatus.available ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void startRuntime()}
+              disabled={runtimeBusy}
+            >
+              {runtimeBusy ? "Starting..." : "Start runtime"}
+            </Button>
+          ) : null}
         </div>
       </header>
 
@@ -94,7 +173,9 @@ export function LearningWorkspace() {
               <CardTitle className="text-sm">Problems</CardTitle>
               <Badge variant="secondary">{filteredProblems.length}</Badge>
             </div>
-            <Label className="sr-only" htmlFor="problem-search">Search problems</Label>
+            <Label className="sr-only" htmlFor="problem-search">
+              Search problems
+            </Label>
             <Input
               id="problem-search"
               value={query}
@@ -102,7 +183,10 @@ export function LearningWorkspace() {
               placeholder="Search topics or title"
               aria-describedby="problem-filter-help"
             />
-            <p id="problem-filter-help" className="text-[11px] text-muted-foreground">
+            <p
+              id="problem-filter-help"
+              className="text-[11px] text-muted-foreground"
+            >
               Filter by title, statement, or topic.
             </p>
             <div className="grid grid-cols-2 gap-2">
@@ -111,7 +195,9 @@ export function LearningWorkspace() {
                 <select
                   className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                   value={dialect}
-                  onChange={(event) => setDialect(event.target.value as ProblemDialect | "all")}
+                  onChange={(event) =>
+                    setDialect(event.target.value as ProblemDialect | "all")
+                  }
                   aria-label="Filter by dialect"
                 >
                   <option value="all">All</option>
@@ -124,7 +210,11 @@ export function LearningWorkspace() {
                 <select
                   className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                   value={difficulty}
-                  onChange={(event) => setDifficulty(event.target.value as ProblemDifficulty | "all")}
+                  onChange={(event) =>
+                    setDifficulty(
+                      event.target.value as ProblemDifficulty | "all"
+                    )
+                  }
                   aria-label="Filter by difficulty"
                 >
                   <option value="all">All</option>
@@ -141,7 +231,11 @@ export function LearningWorkspace() {
                 No problems match these filters.
               </div>
             ) : (
-              <div className="grid gap-1" role="listbox" aria-label="SQL problems">
+              <div
+                className="grid gap-1"
+                role="listbox"
+                aria-label="SQL problems"
+              >
                 {filteredProblems.map((problem) => (
                   <ProblemListItem
                     key={problem.id}
@@ -162,15 +256,28 @@ export function LearningWorkspace() {
           <CardHeader className="border-b bg-muted/20">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <CardTitle className="text-base">{selectedProblem.title}</CardTitle>
-                <CardDescription className="mt-1">Write one read-only statement. Drafts stay with this problem.</CardDescription>
+                <CardTitle className="text-base">
+                  {selectedProblem.title}
+                </CardTitle>
+                <CardDescription className="mt-1">
+                  Write one read-only statement. Drafts stay with this problem.
+                </CardDescription>
               </div>
               <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => void run("run")} disabled={busy}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void run("run")}
+                  disabled={busy}
+                >
                   <Play />
                   Run sample
                 </Button>
-                <Button size="sm" onClick={() => void run("submit")} disabled={busy}>
+                <Button
+                  size="sm"
+                  onClick={() => void run("submit")}
+                  disabled={busy}
+                >
                   <Send />
                   Submit
                 </Button>
@@ -183,7 +290,10 @@ export function LearningWorkspace() {
               id="sql-editor"
               value={draft}
               onChange={(event) =>
-                setDrafts((current) => ({ ...current, [selectedProblem.id]: event.target.value }))
+                setDrafts((current) => ({
+                  ...current,
+                  [selectedProblem.id]: event.target.value,
+                }))
               }
               spellCheck={false}
               className="min-h-52 flex-1 resize-none rounded-lg border border-input bg-[#10151d] p-4 font-mono text-[13px] leading-6 text-slate-100 shadow-inner outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
@@ -199,24 +309,51 @@ export function LearningWorkspace() {
 
         <Card className="min-h-0 overflow-y-auto">
           <CardHeader className="border-b">
-            <CardTitle className="flex items-center gap-2 text-sm"><Table2 className="size-4" /> Schema & prompt</CardTitle>
+            <CardTitle className="flex items-center gap-2 text-sm">
+              <Table2 className="size-4" /> Schema & prompt
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5 p-4">
             <section aria-labelledby="statement-heading">
-              <h3 id="statement-heading" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Statement</h3>
-              <p className="mt-2 text-sm leading-6">{selectedProblem.statement}</p>
+              <h3
+                id="statement-heading"
+                className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+              >
+                Statement
+              </h3>
+              <p className="mt-2 text-sm leading-6">
+                {selectedProblem.statement}
+              </p>
             </section>
             <section aria-labelledby="schema-heading">
-              <h3 id="schema-heading" className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase"><Database className="size-3.5" /> Tables</h3>
+              <h3
+                id="schema-heading"
+                className="flex items-center gap-2 text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+              >
+                <Database className="size-3.5" /> Tables
+              </h3>
               <div className="mt-2 space-y-2">
                 {selectedProblem.schema.map((table) => (
-                  <div key={table.name} className="rounded-lg border bg-muted/20 p-3">
-                    <p className="font-mono text-xs font-semibold">{table.name}</p>
+                  <div
+                    key={table.name}
+                    className="rounded-lg border bg-muted/20 p-3"
+                  >
+                    <p className="font-mono text-xs font-semibold">
+                      {table.name}
+                    </p>
                     <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
                       {table.columns.map((column) => (
-                        <li key={column.name} className="flex items-center justify-between gap-2">
-                          <span className="font-mono text-foreground">{column.name}</span>
-                          <span>{column.type}{column.nullable ? " · nullable" : ""}</span>
+                        <li
+                          key={column.name}
+                          className="flex items-center justify-between gap-2"
+                        >
+                          <span className="font-mono text-foreground">
+                            {column.name}
+                          </span>
+                          <span>
+                            {column.type}
+                            {column.nullable ? " · nullable" : ""}
+                          </span>
                         </li>
                       ))}
                     </ul>
@@ -225,20 +362,48 @@ export function LearningWorkspace() {
               </div>
             </section>
             <section aria-labelledby="topics-heading">
-              <h3 id="topics-heading" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Topics</h3>
+              <h3
+                id="topics-heading"
+                className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+              >
+                Topics
+              </h3>
               <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedProblem.topics.map((topic) => <Badge key={topic} variant="outline">{topic}</Badge>)}
+                {selectedProblem.topics.map((topic) => (
+                  <Badge key={topic} variant="outline">
+                    {topic}
+                  </Badge>
+                ))}
               </div>
             </section>
             <section aria-labelledby="sample-heading">
-              <h3 id="sample-heading" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Public sample output</h3>
+              <h3
+                id="sample-heading"
+                className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
+              >
+                Public sample output
+              </h3>
               <div className="mt-2 overflow-x-auto rounded-lg border">
                 <table className="w-full text-left text-xs">
                   <thead className="bg-muted/40 text-muted-foreground">
-                    <tr>{Object.keys(selectedProblem.sampleRows[0]).map((key) => <th key={key} className="px-2 py-2 font-medium">{key}</th>)}</tr>
+                    <tr>
+                      {Object.keys(selectedProblem.sampleRows[0]).map((key) => (
+                        <th key={key} className="px-2 py-2 font-medium">
+                          {key}
+                        </th>
+                      ))}
+                    </tr>
                   </thead>
                   <tbody>
-                    {selectedProblem.sampleRows.map((row, index) => <tr key={index} className="border-t">{Object.values(row).map((value, valueIndex) => <td key={valueIndex} className="px-2 py-2 font-mono">{value ?? "NULL"}</td>)}</tr>)}
+                    {selectedProblem.sampleRows.map((row, index) => (
+                      <tr key={index} className="border-t">
+                        {Object.values(row).map((value, valueIndex) => (
+                          <td key={valueIndex} className="px-2 py-2 font-mono">
+                            {value ?? "NULL"}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -272,25 +437,50 @@ function ProblemListItem({
     >
       <div className="flex items-start justify-between gap-2">
         <span className="text-sm font-medium">{problem.title}</span>
-        <Badge variant={selected ? "default" : "secondary"}>{difficultyLabels[problem.difficulty]}</Badge>
+        <Badge variant={selected ? "default" : "secondary"}>
+          {difficultyLabels[problem.difficulty]}
+        </Badge>
       </div>
-      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">{problem.statement}</p>
+      <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
+        {problem.statement}
+      </p>
       <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-        <Filter className="size-3" /> {problem.dialect} · {problem.topics.length} topics
+        <Filter className="size-3" /> {problem.dialect} ·{" "}
+        {problem.topics.length} topics
       </div>
     </button>
   )
 }
 
 function ResultBanner({ result }: { result: JudgeRunResult }) {
-  const isSuccess = result.status === "completed" && result.verdict === "Accepted"
+  const isSuccess =
+    result.status === "completed" && result.verdict === "Accepted"
   return (
-    <div className={cn("rounded-lg border p-3 text-sm", isSuccess ? "border-emerald-500/30 bg-emerald-500/10" : "border-amber-500/30 bg-amber-500/10")} role="status">
+    <div
+      className={cn(
+        "rounded-lg border p-3 text-sm",
+        isSuccess
+          ? "border-emerald-500/30 bg-emerald-500/10"
+          : "border-amber-500/30 bg-amber-500/10"
+      )}
+      role="status"
+    >
       <div className="flex items-start gap-2">
-        {isSuccess ? <CheckCircle2 className="mt-0.5 size-4 text-emerald-600" /> : <span className="mt-0.5 size-2 rounded-full bg-amber-500" aria-hidden="true" />}
+        {isSuccess ? (
+          <CheckCircle2 className="mt-0.5 size-4 text-emerald-600" />
+        ) : (
+          <span
+            className="mt-0.5 size-2 rounded-full bg-amber-500"
+            aria-hidden="true"
+          />
+        )}
         <div>
-          <p className="font-medium">{result.verdict ?? "Runner unavailable"}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{result.message} · {result.durationMs} ms</p>
+          <p className="font-medium">
+            {result.verdict ?? "Runner unavailable"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {result.message} · {result.durationMs} ms
+          </p>
         </div>
       </div>
     </div>
