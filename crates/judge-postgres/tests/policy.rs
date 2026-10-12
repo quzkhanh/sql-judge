@@ -33,6 +33,7 @@ fn setup_policy_rejects_privileged_or_mutating_admin_sql() {
     for sql in [
         "CREATE ROLE attacker LOGIN PASSWORD 'secret'",
         "DROP TABLE users",
+        "CREATE TABLE public.users (id integer)",
         "GRANT ALL ON SCHEMA public TO attacker",
         "DO $$ BEGIN PERFORM pg_sleep(1); END $$",
     ] {

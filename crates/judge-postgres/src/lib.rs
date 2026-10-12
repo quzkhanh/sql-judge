@@ -407,6 +407,33 @@ impl PostgresSession {
             }
         }
     }
+
+    pub fn provision_managed_namespace_with_schema(
+        &mut self,
+        environment: &ManagedEnvironment,
+        runner_role: &str,
+        schema_sql: &str,
+    ) -> Result<(), QueryExecutionError> {
+        validate_setup_sql(schema_sql)?;
+        self.provision_managed_namespace(environment, runner_role)?;
+
+        let schema = quote_identifier(&environment.namespace);
+        self.client
+            .batch_execute("BEGIN")
+            .map_err(|_| QueryExecutionError::RuntimeError)?;
+        let setup = self
+            .client
+            .batch_execute(&format!(
+                "SET LOCAL search_path TO {schema}, pg_catalog;\n{schema_sql}"
+            ))
+            .map_err(|_| QueryExecutionError::RuntimeError);
+        let rollback = self.client.batch_execute("COMMIT");
+        if rollback.is_err() {
+            Err(QueryExecutionError::RuntimeError)
+        } else {
+            setup
+        }
+    }
 }
 
 fn is_safe_role_name(role: &str) -> bool {
@@ -536,6 +563,7 @@ pub fn validate_setup_sql(sql: &str) -> Result<(), QueryExecutionError> {
         "pg_read_file",
         "pg_sleep",
         "pg_sleep_for",
+        "public",
         "revoke",
         "role",
         "schema",

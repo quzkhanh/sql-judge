@@ -312,6 +312,41 @@ fn managed_namespace_provisioning_isolated_and_marker_verified() {
 }
 
 #[test]
+fn managed_namespace_schema_setup_isolated_between_environments() {
+    let server = TestServer::start();
+    let mut admin =
+        PostgresSession::connect(&server.admin_connection_string()).expect("connect admin");
+    let first = ManagedEnvironment::new("env-a", "instance-a", "sj_env_a", "nonce-a")
+        .expect("valid first environment");
+    let second = ManagedEnvironment::new("env-b", "instance-b", "sj_env_b", "nonce-b")
+        .expect("valid second environment");
+    let schema_sql = "CREATE TABLE employees (name text); INSERT INTO employees VALUES ('first');";
+
+    admin
+        .provision_managed_namespace_with_schema(&first, "sqljudge_runner", schema_sql)
+        .expect("provision first schema");
+    admin
+        .provision_managed_namespace_with_schema(&second, "sqljudge_runner", schema_sql)
+        .expect("provision second schema");
+
+    let first_rows = admin
+        .execute(
+            "SELECT name FROM \"sj_env_a\".employees",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("read first schema");
+    let second_rows = admin
+        .execute(
+            "SELECT name FROM \"sj_env_b\".employees",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("read second schema");
+
+    assert_eq!(first_rows.rows, second_rows.rows);
+    assert_eq!(first_rows.rows[0][0], SqlValue::Text("first".to_owned()));
+}
+
+#[test]
 fn fixture_setup_cannot_write_to_public_schema_with_admin_session() {
     let server = TestServer::start();
     let mut admin =
