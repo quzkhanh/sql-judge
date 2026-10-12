@@ -1,6 +1,7 @@
 use judge_core::{QueryLimits, SqlValue};
 use judge_postgres::{ManagedPostgresRuntime, ManagedPostgresSession};
 use std::fs;
+use std::process::{Command, Stdio};
 
 #[test]
 fn managed_runtime_starts_owned_socket_instance() {
@@ -48,7 +49,46 @@ fn managed_runtime_restarts_only_with_matching_instance_marker() {
         mismatched,
         Err(judge_postgres::QueryExecutionError::OwnershipVerificationFailed)
     ));
+    let recovered = ManagedPostgresRuntime::start(&root, "runtime-restart")
+        .expect("mismatched ownership check must not stop the owned process");
+    drop(recovered);
     let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn managed_runtime_adopts_owned_process_left_after_app_crash() {
+    let root = std::env::temp_dir().join(format!(
+        "sql-judge-runtime-adopt-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let runtime =
+        ManagedPostgresRuntime::start(&root, "runtime-adopt").expect("start initial runtime");
+    std::mem::forget(runtime);
+
+    let adopted = ManagedPostgresRuntime::start(&root, "runtime-adopt");
+    match adopted {
+        Ok(runtime) => {
+            drop(runtime);
+            let _ = fs::remove_dir_all(root);
+        }
+        Err(error) => {
+            let _ = Command::new("pg_ctl")
+                .args([
+                    "-D",
+                    root.to_str().expect("runtime root"),
+                    "-w",
+                    "stop",
+                    "-m",
+                    "immediate",
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+            let _ = fs::remove_dir_all(&root);
+            panic!("expected adoption of running managed runtime: {error:?}");
+        }
+    }
 }
 
 fn unique_suffix() -> u128 {

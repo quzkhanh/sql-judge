@@ -7,6 +7,7 @@ pub struct ManagedPostgresRuntime {
     root: PathBuf,
     socket: PathBuf,
     user: String,
+    stop_on_drop: bool,
 }
 
 impl ManagedPostgresRuntime {
@@ -64,33 +65,40 @@ impl ManagedPostgresRuntime {
             return Err(QueryExecutionError::ConnectionError);
         }
 
-        let options = format!(
-            "-k {} -p 5432 -c listen_addresses=''",
-            socket
-                .to_str()
-                .ok_or(QueryExecutionError::PolicyViolation)?
-        );
-        let started = Command::new("pg_ctl")
-            .args([
-                "-D",
-                root.to_str().ok_or(QueryExecutionError::PolicyViolation)?,
-                "-o",
-                &options,
-                "-w",
-                "start",
-            ])
+        let root_string = root.to_str().ok_or(QueryExecutionError::PolicyViolation)?;
+        let running = Command::new("pg_ctl")
+            .args(["-D", root_string, "status"])
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status()
-            .map_err(|_| QueryExecutionError::ConnectionError)?;
-        if !started.success() {
-            if fresh {
-                let _ = fs::remove_dir_all(&root);
+            .is_ok_and(|status| status.success());
+        if !running {
+            let options = format!(
+                "-k {} -p 5432 -c listen_addresses=''",
+                socket
+                    .to_str()
+                    .ok_or(QueryExecutionError::PolicyViolation)?
+            );
+            let started = Command::new("pg_ctl")
+                .args(["-D", root_string, "-o", &options, "-w", "start"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|_| QueryExecutionError::ConnectionError)?;
+            if !started.success() {
+                if fresh {
+                    let _ = fs::remove_dir_all(&root);
+                }
+                return Err(QueryExecutionError::ConnectionError);
             }
-            return Err(QueryExecutionError::ConnectionError);
         }
 
-        let runtime = Self { root, socket, user };
+        let mut runtime = Self {
+            root,
+            socket,
+            user,
+            stop_on_drop: !running,
+        };
         let initialized = if fresh {
             runtime.initialize(instance_id)
         } else {
@@ -100,6 +108,7 @@ impl ManagedPostgresRuntime {
             drop(runtime);
             return Err(error);
         }
+        runtime.stop_on_drop = true;
         Ok(runtime)
     }
 
@@ -137,6 +146,9 @@ impl ManagedPostgresRuntime {
 
 impl Drop for ManagedPostgresRuntime {
     fn drop(&mut self) {
+        if !self.stop_on_drop {
+            return;
+        }
         let _ = Command::new("pg_ctl")
             .args([
                 "-D",
