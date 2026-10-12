@@ -259,3 +259,17 @@ fn recovery_state_cannot_start_a_running_job() {
         EnvironmentState::NeedsRecovery
     );
 }
+
+#[test]
+fn provisioning_environment_can_be_marked_ready_only_after_setup() {
+    let mut ledger = EnvironmentLedger::default();
+    let mut pending = record("env-a", "sj_a");
+    pending.state = EnvironmentState::Provisioning;
+    ledger.create(pending).expect("create pending environment");
+
+    ledger.mark_ready("env-a").expect("mark setup complete");
+    assert_eq!(
+        ledger.inspect("env-a").expect("ready environment").state,
+        EnvironmentState::Ready
+    );
+}
