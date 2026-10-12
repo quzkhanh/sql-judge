@@ -1,0 +1,9 @@
+[package]
+name = "app-storage"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+environment-manager = { path = "../environment-manager" }
+rusqlite = "0.40.2"
+thiserror = "2"

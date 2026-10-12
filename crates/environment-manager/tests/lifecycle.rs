@@ -1,0 +1,249 @@
+use environment_manager::{
+    DestructiveAction, EnvironmentLedger, EnvironmentMode, EnvironmentRecord, EnvironmentState,
+    LifecycleError,
+};
+
+fn record(env_id: &str, namespace: &str) -> EnvironmentRecord {
+    EnvironmentRecord {
+        env_id: env_id.to_owned(),
+        instance_id: format!("instance-{env_id}"),
+        pack_id: "hr-sql-101".to_owned(),
+        namespace: namespace.to_owned(),
+        ownership_nonce: format!("nonce-{env_id}"),
+        mode: EnvironmentMode::Managed,
+        state: EnvironmentState::Ready,
+    }
+}
+
+fn reset_action(env_id: &str) -> DestructiveAction {
+    DestructiveAction::Reset {
+        env_id: env_id.to_owned(),
+        instance_id: format!("instance-{env_id}"),
+        ownership_nonce: format!("nonce-{env_id}"),
+        confirmed: true,
+    }
+}
+
+#[test]
+fn create_and_clone_keep_same_pack_namespaces_isolated() {
+    let mut ledger = EnvironmentLedger::default();
+    ledger
+        .create(record("env-a", "sj_a"))
+        .expect("create first");
+    let cloned = ledger
+        .clone_environment("env-a", record("env-b", "sj_b"))
+        .expect("clone second");
+
+    assert_eq!(cloned.pack_id, "hr-sql-101");
+    assert_ne!(
+        ledger.inspect("env-a").expect("first").namespace,
+        cloned.namespace
+    );
+    assert_eq!(ledger.list().len(), 2);
+}
+
+#[test]
+fn failed_rebuild_preserves_old_record_and_delete_requires_ownership() {
+    let mut ledger = EnvironmentLedger::default();
+    ledger.create(record("env-a", "sj_a")).expect("create");
+    let failed = ledger.rebuild(
+        "env-a",
+        record("env-a-new", "sj_new"),
+        reset_action("env-a"),
+        |_| false,
+    );
+    assert_eq!(failed, Err(LifecycleError::ReplacementValidationFailed));
+    assert_eq!(ledger.inspect("env-a").expect("old").namespace, "sj_a");
+
+    let mut busy = record("env-a", "sj_a");
+    busy.state = EnvironmentState::Running;
+    ledger.create(busy).expect_err("duplicate busy record");
+    ledger.mark_running("env-a").expect("mark busy");
+    assert!(matches!(
+        ledger.delete(
+            "env-a",
+            DestructiveAction::Delete {
+                env_id: "env-a".to_owned(),
+                instance_id: "instance-env-a".to_owned(),
+                ownership_nonce: "nonce-env-a".to_owned(),
+                confirmed: true,
+            }
+        ),
+        Err(LifecycleError::Ownership(_))
+    ));
+}
+
+#[test]
+fn create_rejects_unsafe_or_reused_namespaces() {
+    let mut ledger = EnvironmentLedger::default();
+    ledger.create(record("env-a", "sj_a")).expect("create");
+
+    assert_eq!(
+        ledger.create(record("env-b", "sj_a")),
+        Err(LifecycleError::NamespaceConflict)
+    );
+    assert_eq!(
+        ledger.create(record("env-c", "sj-a")),
+        Err(LifecycleError::InvalidNamespace)
+    );
+    assert_eq!(
+        ledger.create(record("env-d", "public")),
+        Err(LifecycleError::InvalidNamespace)
+    );
+}
+
+#[test]
+fn rebuild_rejects_namespace_collision_without_replacing_old_record() {
+    let mut ledger = EnvironmentLedger::default();
+    ledger
+        .create(record("env-a", "sj_a"))
+        .expect("create first");
+    ledger
+        .create(record("env-b", "sj_b"))
+        .expect("create second");
+
+    let replacement = record("env-a-new", "sj_b");
+    assert_eq!(
+        ledger.rebuild("env-a", replacement, reset_action("env-a"), |_| true),
+        Err(LifecycleError::NamespaceConflict)
+    );
+    assert_eq!(
+        ledger.inspect("env-a").expect("old record").namespace,
+        "sj_a"
+    );
+}
+
+#[test]
+fn rebuild_lock_blocks_delete_until_replacement_is_ready() {
+    let mut ledger = EnvironmentLedger::default();
+    ledger.create(record("env-a", "sj_a")).expect("create");
+
+    ledger
+        .begin_rebuild("env-a", reset_action("env-a"))
+        .expect("begin rebuild");
+    assert_eq!(
+        ledger.inspect("env-a").expect("rebuilding").state,
+        EnvironmentState::Rebuilding
+    );
+    assert!(matches!(
+        ledger.delete(
+            "env-a",
+            DestructiveAction::Delete {
+                env_id: "env-a".to_owned(),
+                instance_id: "instance-env-a".to_owned(),
+                ownership_nonce: "nonce-env-a".to_owned(),
+                confirmed: true,
+            }
+        ),
+        Err(LifecycleError::Ownership(_))
+    ));
+    assert!(matches!(
+        ledger.finish_rebuild(
+            "env-a",
+            record("env-a-replacement", "sj_rebuilt"),
+            DestructiveAction::Delete {
+                env_id: "env-a".to_owned(),
+                instance_id: "instance-env-a".to_owned(),
+                ownership_nonce: "nonce-env-a".to_owned(),
+                confirmed: true,
+            },
+            |_| true,
+        ),
+        Err(LifecycleError::Ownership(_))
+    ));
+
+    ledger
+        .finish_rebuild(
+            "env-a",
+            record("env-a-replacement", "sj_rebuilt"),
+            reset_action("env-a"),
+            |_| true,
+        )
+        .expect("finish rebuild");
+    assert_eq!(
+        ledger.inspect("env-a").expect("ready").state,
+        EnvironmentState::Ready
+    );
+    assert_eq!(
+        ledger.inspect("env-a").expect("ready").namespace,
+        "sj_rebuilt"
+    );
+}
+
+#[test]
+fn delete_lock_requires_authorization_before_record_removal() {
+    let mut ledger = EnvironmentLedger::default();
+    ledger.create(record("env-a", "sj_a")).expect("create");
+    let action = DestructiveAction::Delete {
+        env_id: "env-a".to_owned(),
+        instance_id: "instance-env-a".to_owned(),
+        ownership_nonce: "nonce-env-a".to_owned(),
+        confirmed: true,
+    };
+
+    ledger
+        .begin_delete("env-a", action.clone())
+        .expect("begin delete");
+    assert_eq!(
+        ledger.inspect("env-a").expect("deleting").state,
+        EnvironmentState::Deleting
+    );
+    assert!(matches!(
+        ledger.begin_delete("env-a", action.clone()),
+        Err(LifecycleError::Ownership(_))
+    ));
+    let forged = DestructiveAction::Delete {
+        env_id: "env-a".to_owned(),
+        instance_id: "forged-instance".to_owned(),
+        ownership_nonce: "nonce-env-a".to_owned(),
+        confirmed: true,
+    };
+    assert!(matches!(
+        ledger.finish_delete("env-a", forged),
+        Err(LifecycleError::Ownership(_))
+    ));
+    assert!(matches!(
+        ledger.finish_delete("env-a", reset_action("env-a")),
+        Err(LifecycleError::Ownership(_))
+    ));
+    ledger
+        .finish_delete("env-a", action)
+        .expect("finish delete");
+    assert_eq!(ledger.inspect("env-a"), Err(LifecycleError::NotFound));
+}
+
+#[test]
+fn restore_rebuilds_ledger_and_rejects_conflicting_persisted_records() {
+    let restored = EnvironmentLedger::restore([record("env-a", "sj_a"), record("env-b", "sj_b")])
+        .expect("restore ledger");
+    assert_eq!(restored.list().len(), 2);
+    assert_eq!(
+        restored
+            .inspect("env-b")
+            .expect("restored record")
+            .namespace,
+        "sj_b"
+    );
+
+    assert!(matches!(
+        EnvironmentLedger::restore([record("env-a", "sj_a"), record("env-b", "sj_a")]),
+        Err(LifecycleError::NamespaceConflict)
+    ));
+}
+
+#[test]
+fn recovery_state_cannot_start_a_running_job() {
+    let mut ledger = EnvironmentLedger::default();
+    let mut record = record("env-a", "sj_a");
+    record.state = EnvironmentState::NeedsRecovery;
+    ledger.create(record).expect("create recovery record");
+
+    assert!(matches!(
+        ledger.mark_running("env-a"),
+        Err(LifecycleError::Ownership(_))
+    ));
+    assert_eq!(
+        ledger.inspect("env-a").expect("recovery record").state,
+        EnvironmentState::NeedsRecovery
+    );
+}

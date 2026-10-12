@@ -1,0 +1,60 @@
+# Task queue — one small verified task per agent
+
+All items below are **planned, not implemented**. Do not mark done without full RED/GREEN/REFACTOR evidence and acceptance IDs. For each task, link a code change, relevant focused tests and negative case. Keep typical changes to <=5 files. Before touching source, inspect scaffold.
+
+## P0 — Foundation and contract
+
+- [x] **T01 — Inspect scaffold and baseline**; Dep: none; AC-001. Enumerate real tree, package scripts, Bun lock, Cargo entrypoint, Tauri permissions, release workflow and existing tests. **Verify:** actual `git status`, `bun run build` and cargo check output; record baseline in `docs/operations/`. Evidence: `docs/operations/BASELINE-2026-10-12.md`; frontend build/typecheck and `cargo check` pass, while pre-existing lint and Rust fmt findings are recorded.
+- [x] **T02 — Integrate docs/validator non-destructively**; Dep: T01; AC-008. Merge supplied kit and add safe Bun or CI check; do not replace existing files. **Verify:** structural sample valid; 9+ negative/unit tests green. Evidence: `bun run validate:pack -- examples/packs/hr-sql-101` and the sample ZIP both report `structural_status=valid` with `scripts/requirements.txt` installed; 10 validator tests pass, including traversal, symlink, duplicate-entry, unknown-field, dialect, missing-reference, duplicate-ID, and undeclared-file negatives.
+- [x] **T03 — Typed shared problem and result contracts**; Dep: T02; AC-003/005. Add domain models with strict type tags and validation. **Verify:** Rust serialization roundtrip test and invalid model test. Evidence: `crates/judge-core` pure contract crate, 4 tests pass; `cargo fmt`/clippy pass for the crate; Tauri standalone check/test remain passing.
+- [x] **T04 — Pure bag comparator RED/GREEN**; Dep: T03; AC-005/006. Ordered/unordered policy, multiplicity, null, column names/types. **Verify:** unit table tests and shuffled property cases. Evidence: 5 comparator tests pass for duplicate multiplicity, row order, NULL typing and strict column names/types.
+- [x] **T05 — Verdict aggregation and safe error mapping**; Dep: T03/T04; AC-007. Distinguish setup/user errors and cancellation. **Verify:** test reference failure => JudgeError and user syntax => SyntaxError. Evidence: 3 verdict tests pass; reference/setup failures map to `JudgeError`, user failures remain typed, empty aggregation fails closed.
+
+### Checkpoint G1A
+- [x] T04/T05 Rust tests and formatting pass; cannot claim SQL runtime correctness yet. Evidence: comparator, verdict, workspace test, clippy and fmt checks pass; SQL runtime correctness is covered separately by T06-T08.
+
+## P1 — Real PostgreSQL + usable learning slice
+
+- [x] **T06 — Dedicated disposable PG test harness**; Dep: T03; SEC-001/003/010. Create low-privilege runner/provisioner fixture in CI/dev test setup, never user's DB. **Verify:** cannot create/drop table as runner; no network exposure by default. Evidence: `bun run test:pg-harness` passes with an ephemeral `initdb` cluster bound to `127.0.0.1`, temporary credentials, and runner create/drop denial.
+- [x] **T07 — Reference/user query execution adapter**; Dep: T06/T05; AC-004/007. Use typed PG codec, fresh fixture state and deadlines; enforce result caps. **Verify:** correlated and window queries accepted, timeout/result-limit cases distinct. Evidence: `judge-postgres` adapter integration tests run a real ephemeral PostgreSQL cluster, decode typed rows/NULLs through a streaming iterator, and distinguish syntax, timeout and result-limit failures; policy tests reject writes, multiple statements and dangerous functions. Numeric codec remains explicit unsupported per ADR-007; bounded streaming is recorded in ADR-011.
+- [x] **T08 — Judge orchestrator vertical backend**; Dep: T07/T04; AC-004/007. Run all tests deterministically with recovery/cleanup. **Verify:** wrong hardcoded SQL rejected, reference failure JudgeError. Evidence: `judge_submission` runs each trusted fixture in a transaction, switches to the constrained runner role before reference/user SQL, rolls back cleanup, accepts correlated/window-equivalent SQL, rejects hardcoded output, and maps broken reference to `JudgeError`; adapter all-target tests and clippy pass.
+- [x] **T09 — Problem list + detail + schema explorer**; Dep: T02/T03; AC-002. Extend existing tauri-ui dashboard and navigation. **Verify:** keyboard-only select problem and display schema; no UI reset. Evidence: `LearningWorkspace` adds searchable dialect/difficulty/topic catalog, focusable problem listbox, persistent per-problem drafts, statement/schema/sample panels, and responsive three-pane layout; `bun run typecheck` and `bun run build` pass.
+- [ ] **T10 — Monaco editor / Run / Submit IPC**; Dep: T08/T09; AC-003/004. Typed wrappers/events and bounded result table. **Verify:** user can run public sample and submit all tests; errors surfaced distinctly. Progress: accessible editor, typed judge wrappers, read-only managed-environment wrappers and fail-closed native commands are present; full managed-runtime command wiring remains blocked until runtime lifecycle/configuration is implemented.
+
+### Checkpoint G2
+- [ ] End-to-end local Run -> Submit Accepted/WrongAnswer with real PostgreSQL and UI; cancellation work may still be pending.
+
+## P2 — Persistence, environment lifecycle, atomic imports
+
+- [x] **T11 — SQLite migrations and submission repository**; Dep: T08; AC-013. Version/hash fields and transactional per-test results. **Verify:** restart retains history; rollback transaction fails safely. Evidence: `app-storage` WAL-backed repository persists pack hash/engine/policy metadata across reopen and rolls back duplicate submission writes; 2 integration tests and clippy pass.
+- [x] **T12 — Environment ledger/ownership verification**; Dep: T06; AC-010/011. Rust ownership checks + durable markers. **Verify:** forged env ID and external connection cannot reset. Evidence: `environment-manager` policy verifies managed mode, env/instance/nonce, confirmation and lifecycle state; forged ID, nonce, external mode and busy state tests pass. Durable persistence wiring remains with T13/T14.
+- [ ] **T13 — Managed env create/clone/inspect**; Dep: T12; AC-010. Provision namespace and validate schema, no shared tables. **Verify:** two packs reuse same table names without contamination. Progress: pure ledger create/clone/inspect rejects unsafe or reused namespaces; PostgreSQL provisioning creates isolated `sj_*` namespaces with typed ownership markers and runner grants, and rejects forged marker identity; durable records restore into native Tauri state and read-only list/inspect IPC is wired. Full pack schema/fixture provisioning and Tauri provisioning lifecycle remain pending.
+- [ ] **T14 — Managed reset/rebuild/delete**; Dep: T13; AC-011/012. Replacement-first, locks/confirmation, rollback. **Verify:** mid-rebuild failure leaves old env intact; deletion denied while job running. Progress: pure ledger now exposes explicit `begin_rebuild`/`finish_rebuild` and authorization-gated `begin_delete`/`finish_delete` transitions; deletion is denied while rebuilding/deleting and successful replacement returns to ready. Durable SQLite ledger reopen/list/restore tests pass. DB-backed rebuild/cleanup, durable lock persistence and crash reconciliation remain pending.
+- [x] **T15 — Atomic problem import runtime validator**; Dep: T07/T02/T13; AC-008/009. Path/manifest checks then disposable PostgreSQL reference tests, immutable publish. **Verify:** malformed/poisoned pack leaves no installed artifact. Evidence: `cargo test -p problem-pack --all-targets -- --nocapture` passes 9 tests, including runtime-failure cleanup, immutable digest publication/idempotency and version conflict; pack setup runs only inside a transaction-scoped non-login fixture role/schema and qualified `public.*` writes are rejected; workspace clippy/fmt and 10 Python validator tests pass. ZIP extraction remains in the existing bounded Python validator and managed PostgreSQL provisioning remains caller-owned.
+- [ ] **T16 — Packs + Environments UI**; Dep: T14/T15; AC-009/011/019. Import status, exact impact previews, disabled external destructive controls. **Verify:** keyboard navigation and direct forged IPC denied.
+- [ ] **T17 — Judge cancellation and crash recovery**; Dep: T08/T12; AC-017. Driver cancel, process watchdog, owned cleanup on restart. **Verify:** forced interruption leaves no leaked active test env, no false Accepted.
+- [ ] **T18 — Progress/history/backup**; Dep: T11/T16; AC-013/020. UI, restore/export (no passwords). **Verify:** roundtrip metadata/history and secret canary absent.
+
+### Checkpoint G3
+- [ ] Judge/pack/environment negative tests pass against local disposable PG; destructive safety verified in Rust handler, not just UI.
+
+## P3 — External PG + Microsoft SQL Server explorer
+
+- [ ] **T19 — Connection profile + secret vault**; Dep: T03; AC-015. Profile metadata only, TLS safe defaults, session fallback. **Verify:** fake password not present in SQLite/logs, failed TLS rejected.
+- [ ] **T20 — External PG read-only metadata/SELECT**; Dep: T19; AC-014. Timeout, bounded rows, least-privileged role. **Verify:** test DB SELECT works; INSERT/DROP denied by server.
+- [ ] **T21 — External SQL Server read-only adapter**; Dep: T19; AC-014. T-SQL metadata, typed rows, distinct errors; no generic PG assumptions. **Verify:** MSSQL disposable instance SELECT works and forbidden writes denied.
+- [ ] **T22 — Connections UI + remote failure behavior**; Dep: T20/T21; AC-015/019. Engine/port/TLS controls; external reset disabled. **Verify:** offline external DB doesn't break local app and password not displayed.
+
+### Checkpoint G4
+- [ ] Against disposable PG+MSSQL, read-only behavior enforced by DB credentials and app; external destructive operation blocked.
+
+## P4 — Platform delivery and optional expansion
+
+- [ ] **T23 — Review existing GitHub release matrix**; Dep: T01; AC-022. Preserve six selected artifacts, audit scripts, secrets and package manager use. **Verify:** workflow diff reviewed; actual runner log/artifacts archived.
+- [ ] **T24 — Managed PG runtime packaging decision/prototype**; Dep: T14/T23; AC-016/022. Source/license/signing/process/data-dir plan by OS. **Verify:** run on clean machine or VM and expose failures honestly.
+- [ ] **T25 — Platform release smoke tests**; Dep: T24; AC-022. Test NSIS, Portable, arm64 DMG, Intel DMG, AppImage, DEB independently. **Verify:** artifact install/launch/judge or clearly documented runtime prerequisite; do not claim untested platform support.
+- [ ] **T26 — Optional scoped external writable sandbox ADR**; Dep: T22; AC-021. Separate reviewed feature after security design. **Verify:** approved threat model and disposable DB tests; no build until approved.
+- [ ] **T27 — Optional SQL Server Judge**; Dep: T21/T26; AC-021. T-SQL-specific controlled test environment, reference/fixture and comparator integration. **Verify:** actual MSSQL tests, cancellation, no external production changes.
+
+### Checkpoint G5
+- [ ] Definition of Done + threat model + release artifacts verified with fresh evidence.

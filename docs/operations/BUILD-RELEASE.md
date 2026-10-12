@@ -1,0 +1,52 @@
+# Build and release contract — existing tauri-ui scaffold
+
+## User-selected generation state
+Created with `create-tauri-ui` target `sql-judge`, `Vite`, preset `b0`, Starter dashboard, Size optimization, Invoke example, Release workflow, defaults for advanced settings. Selected release assets: **Windows NSIS + Portable**, **macOS Apple Silicon DMG + Intel DMG**, **Linux AppImage + DEB**. Preserve generated config; inspect source files before changing them. CLI reference: https://github.com/agmmnn/tauri-ui/blob/master/packages/create-tauri-ui/README.md
+
+## First checkout inspection
+```bash
+pwd
+find . -maxdepth 3 -type f \( -name 'package.json' -o -name 'Cargo.toml' -o -name 'tauri.conf.json' -o -name 'bun.lock' \) -print
+ls .github/workflows
+git status --short
+cat package.json
+cat src-tauri/Cargo.toml
+```
+Only run inside the existing app checkout. Do not run a new `create-tauri-ui` generation over current files.
+
+## JS toolchain
+The current tauri-ui scaffold specifies **Bun** (check actual `packageManager`, Bun lockfile and scripts before running). Common:
+```bash
+bun install --frozen-lockfile
+bun run tauri dev
+bun run build
+```
+Do not assume `bun run test`, `bun run lint`, `bun run check` exist until inspecting `package.json`. Add verified scripts in a dedicated task with tests and CI.
+
+## Rust checks
+```bash
+cargo fmt --all -- --check
+cargo test --manifest-path src-tauri/Cargo.toml
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+```
+After Cargo workspace exists, use `cargo test --workspace`/`cargo clippy --workspace ...` and explicitly ensure Tauri entrypoint is a member.
+
+## CI quality gates
+1. Structural pack schema validator + negative tests.
+2. Rust core unit tests / property-based comparator tests.
+3. Rust PostgreSQL integration tests (Linux runner with disposable local DB and least-privilege role, never shared production server).
+4. TS typecheck/lint/unit tests as scripts become available.
+5. Release jobs for selected six assets, signing/notarization secrets managed by GitHub not committed. Validate file existence, unpack/install smoke and native runtime prerequisite.
+6. Artifact naming/version/architecture verified from actual builds; no "six platforms supported" claim from just workflow YAML.
+
+## PostgreSQL runtime distribution trade-off
+Offline app binary is not synonymous with self-contained SQL engine. At P1 local PostgreSQL must be installed or run in a dedicated disposable local container; UI must explain missing runtime. At P4 decide per OS between managed sidecar distributions vs validated external local install; package platform binaries, keep PostgreSQL license notices, maintain safe data dir and service lifecycle, run low-privilege, verify codesigning/port binding. Do NOT bundle arbitrary binaries from untrusted URL in release workflow.
+
+## Pre-release checklist
+- [ ] `bun.lock` + `Cargo.lock` committed as appropriate and install frozen.
+- [ ] Existing tauri-ui window/theme/debug/external-link/size optimization working.
+- [ ] No secrets in code/CI logs; dependency audits triaged for reachable issues.
+- [ ] Tauri capability allowlist minimized; filesystem/network access intentional.
+- [ ] DB recovery/reset fails closed and user-visible status accurate.
+- [ ] Build artifacts validated for all selected architectures, with runtime readiness test and install/uninstall behavior.
+- [ ] Release notes clearly specify whether a preinstalled local PostgreSQL is required.

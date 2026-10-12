@@ -11,4 +11,11 @@ export default defineConfig({
       "@": resolve(import.meta.dirname, "./src"),
     },
   },
+  server: {
+    port: 3000,
+    strictPort: true,
+    watch: {
+      ignored: ["**/src-tauri/target/**"],
+    },
+  },
 })

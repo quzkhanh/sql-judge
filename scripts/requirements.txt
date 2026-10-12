@@ -1,0 +1,2 @@
+# Dev-only structural validator. Not a frontend/runtime dependency.
+jsonschema>=4.22,<5

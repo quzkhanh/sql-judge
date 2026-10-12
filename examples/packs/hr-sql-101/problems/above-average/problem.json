@@ -1,0 +1,28 @@
+{
+  "id": "above-average",
+  "title": "Employees Earning Above Their Department Average",
+  "difficulty": "medium",
+  "topics": ["correlated-subquery", "aggregation"],
+  "statement": "Return one row per employee whose salary is STRICTLY greater than the average of non-NULL salaries in their own department. Output employee_id (integer) and employee_name (text). Do not rely on row ordering; there may be multiple departments, tied salaries, NULL salaries, and departments with no employees.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {"name": "employee_id", "type": "integer"},
+      {"name": "employee_name", "type": "text"}
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 2000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {"id": "basic", "file": "tests/basic.sql", "hidden": false},
+    {"id": "edge", "file": "tests/edge.sql", "hidden": true},
+    {"id": "empty", "file": "tests/empty.sql", "hidden": true}
+  ]
+}

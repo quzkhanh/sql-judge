@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "crates/judge-core",
+    "crates/judge-postgres",
+    "crates/app-storage",
+    "crates/environment-manager",
+    "crates/problem-pack",
+]
+exclude = ["src-tauri"]
+resolver = "3"
