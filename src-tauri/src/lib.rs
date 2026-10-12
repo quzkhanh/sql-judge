@@ -2,10 +2,12 @@ use app_storage::EnvironmentStore;
 use environment_manager::{
     EnvironmentLedger, EnvironmentMode, EnvironmentRecord, EnvironmentState,
 };
-use judge_postgres::ManagedPostgresRuntime;
+use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, Verdict};
+use judge_postgres::{JudgeCase, ManagedPostgresRuntime, PostgresSession, judge_submission};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Instant;
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, State};
 use tauri_plugin_log::{Target, TargetKind};
@@ -41,6 +43,17 @@ struct JudgeColumn {
     name: String,
     r#type: String,
 }
+
+const SUPPORTED_PROBLEM_ID: &str = "above-average";
+const SCHEMA_SQL: &str = include_str!("../../examples/packs/hr-sql-101/schema/001_tables.sql");
+const REFERENCE_SQL: &str =
+    include_str!("../../examples/packs/hr-sql-101/problems/above-average/reference.sql");
+const BASIC_FIXTURE_SQL: &str =
+    include_str!("../../examples/packs/hr-sql-101/problems/above-average/tests/basic.sql");
+const EDGE_FIXTURE_SQL: &str =
+    include_str!("../../examples/packs/hr-sql-101/problems/above-average/tests/edge.sql");
+const EMPTY_FIXTURE_SQL: &str =
+    include_str!("../../examples/packs/hr-sql-101/problems/above-average/tests/empty.sql");
 
 struct ManagedEnvironmentState {
     _store: EnvironmentStore,
@@ -160,26 +173,23 @@ fn managed_environment_summary(record: &EnvironmentRecord) -> Option<ManagedEnvi
     })
 }
 
+fn policy_error(message: &str) -> JudgeRunResult {
+    JudgeRunResult {
+        status: "error".to_owned(),
+        verdict: Some("PolicyViolation".to_owned()),
+        columns: Vec::new(),
+        rows: Vec::new(),
+        duration_ms: 0,
+        message: message.to_owned(),
+    }
+}
+
 fn unavailable_judge(request: JudgeRunRequest) -> JudgeRunResult {
     if request.problem_id.trim().is_empty() || request.mode != "run" && request.mode != "submit" {
-        return JudgeRunResult {
-            status: "error".to_owned(),
-            verdict: Some("PolicyViolation".to_owned()),
-            columns: Vec::new(),
-            rows: Vec::new(),
-            duration_ms: 0,
-            message: "The judge request is missing a valid problem or mode.".to_owned(),
-        };
+        return policy_error("The judge request is missing a valid problem or mode.");
     }
     if request.sql.len() > 65_536 {
-        return JudgeRunResult {
-            status: "error".to_owned(),
-            verdict: Some("PolicyViolation".to_owned()),
-            columns: Vec::new(),
-            rows: Vec::new(),
-            duration_ms: 0,
-            message: "SQL input exceeds the 64 KiB limit.".to_owned(),
-        };
+        return policy_error("SQL input exceeds the 64 KiB limit.");
     }
 
     JudgeRunResult {
@@ -192,14 +202,149 @@ fn unavailable_judge(request: JudgeRunRequest) -> JudgeRunResult {
     }
 }
 
-#[tauri::command]
-fn run_sample(request: JudgeRunRequest) -> JudgeRunResult {
-    unavailable_judge(request)
+fn verdict_name(verdict: Verdict) -> &'static str {
+    match verdict {
+        Verdict::Accepted => "Accepted",
+        Verdict::WrongAnswer => "WrongAnswer",
+        Verdict::SyntaxError => "SyntaxError",
+        Verdict::RuntimeError => "RuntimeError",
+        Verdict::TimeLimitExceeded => "TimeLimitExceeded",
+        Verdict::ResultLimitExceeded => "ResultLimitExceeded",
+        Verdict::PolicyViolation => "PolicyViolation",
+        Verdict::Cancelled => "Cancelled",
+        Verdict::JudgeError => "JudgeError",
+    }
+}
+
+fn output_policy() -> OutputPolicy {
+    OutputPolicy::new(
+        RowOrder::Unordered,
+        true,
+        true,
+        vec![
+            Column::new("employee_id", LogicalType::Integer),
+            Column::new("employee_name", LogicalType::Text),
+        ],
+    )
+}
+
+fn judge_cases(submit: bool) -> Vec<JudgeCase<'static>> {
+    let fixtures = if submit {
+        vec![
+            ("basic", BASIC_FIXTURE_SQL),
+            ("edge", EDGE_FIXTURE_SQL),
+            ("empty", EMPTY_FIXTURE_SQL),
+        ]
+    } else {
+        vec![("basic", BASIC_FIXTURE_SQL)]
+    };
+    fixtures
+        .into_iter()
+        .map(|(id, fixture_sql)| JudgeCase {
+            id,
+            schema_sql: SCHEMA_SQL,
+            fixture_sql,
+            reference_sql: REFERENCE_SQL,
+            output: output_policy(),
+            limits: QueryLimits::new(2_000, 10_000, 16 * 1024 * 1024),
+        })
+        .collect()
+}
+
+fn judge_request(
+    request: JudgeRunRequest,
+    state: &Mutex<ManagedEnvironmentState>,
+    expected_mode: &str,
+) -> JudgeRunResult {
+    if request.problem_id.trim().is_empty()
+        || request.sql.len() > 65_536
+        || !matches!(request.mode.as_str(), "run" | "submit")
+    {
+        return unavailable_judge(request);
+    }
+    if request.problem_id != SUPPORTED_PROBLEM_ID || request.mode != expected_mode {
+        return policy_error("The requested problem or judge mode is not available.");
+    }
+    let started = Instant::now();
+    let mut state = match state.lock() {
+        Ok(state) => state,
+        Err(_) => {
+            return JudgeRunResult {
+                status: "error".to_owned(),
+                verdict: Some("JudgeError".to_owned()),
+                columns: Vec::new(),
+                rows: Vec::new(),
+                duration_ms: 0,
+                message: "Managed environment state is busy.".to_owned(),
+            };
+        }
+    };
+    if state.runtime.is_none() && ensure_managed_runtime(&mut state).is_err() {
+        return JudgeRunResult {
+            status: "unavailable".to_owned(),
+            verdict: None,
+            columns: Vec::new(),
+            rows: Vec::new(),
+            duration_ms: started.elapsed().as_millis() as u64,
+            message: "Managed PostgreSQL runtime could not be started.".to_owned(),
+        };
+    }
+    let connection_string = match state.runtime.as_ref() {
+        Some(runtime) => runtime.connection_string(),
+        None => {
+            return JudgeRunResult {
+                status: "unavailable".to_owned(),
+                verdict: None,
+                columns: Vec::new(),
+                rows: Vec::new(),
+                duration_ms: started.elapsed().as_millis() as u64,
+                message: "Managed PostgreSQL runtime is unavailable.".to_owned(),
+            };
+        }
+    };
+    let mut session = match PostgresSession::connect(&connection_string) {
+        Ok(session) => session,
+        Err(_) => {
+            return JudgeRunResult {
+                status: "error".to_owned(),
+                verdict: Some("JudgeError".to_owned()),
+                columns: Vec::new(),
+                rows: Vec::new(),
+                duration_ms: started.elapsed().as_millis() as u64,
+                message: "Managed PostgreSQL runtime connection failed.".to_owned(),
+            };
+        }
+    };
+    let report = judge_submission(
+        &mut session,
+        "sqljudge_runner",
+        &judge_cases(expected_mode == "submit"),
+        &request.sql,
+    );
+    JudgeRunResult {
+        status: "completed".to_owned(),
+        verdict: Some(verdict_name(report.verdict).to_owned()),
+        columns: Vec::new(),
+        rows: Vec::new(),
+        duration_ms: started.elapsed().as_millis() as u64,
+        message: format!("{} test case(s) evaluated.", report.tests.len()),
+    }
 }
 
 #[tauri::command]
-fn submit_solution(request: JudgeRunRequest) -> JudgeRunResult {
-    unavailable_judge(request)
+fn run_sample(
+    request: JudgeRunRequest,
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> JudgeRunResult {
+    judge_request(request, state.inner(), "run")
+}
+
+#[tauri::command]
+fn submit_solution(
+    request: JudgeRunRequest,
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> JudgeRunResult {
+    judge_request(request, state.inner(), "submit")
 }
 
 #[tauri::command]
@@ -333,9 +478,11 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        JudgeRunRequest, load_environment_state, managed_environment_summary,
-        managed_runtime_status_value, unavailable_judge,
+        JudgeRunRequest, SUPPORTED_PROBLEM_ID, ensure_managed_runtime, judge_request,
+        load_environment_state, managed_environment_summary, managed_runtime_status_value,
+        unavailable_judge, verdict_name,
     };
+    use std::sync::Mutex;
 
     #[test]
     fn native_bridge_fails_closed_when_runtime_is_missing() {
@@ -354,6 +501,57 @@ mod tests {
         let status = managed_runtime_status_value(false);
         assert!(!status.available);
         assert_eq!(status.state, "unavailable");
+    }
+
+    #[test]
+    fn native_verdict_names_are_stable() {
+        assert_eq!(verdict_name(judge_core::Verdict::Accepted), "Accepted");
+        assert_eq!(
+            verdict_name(judge_core::Verdict::WrongAnswer),
+            "WrongAnswer"
+        );
+    }
+
+    #[test]
+    fn native_run_executes_sample_against_managed_runtime() {
+        let root = std::env::temp_dir().join(format!(
+            "sql-judge-tauri-run-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).expect("create test root");
+        let path = root.join("state.sqlite");
+        let mut native_state = load_environment_state(&path).expect("load native state");
+        ensure_managed_runtime(&mut native_state).expect("start managed runtime");
+        let state = Mutex::new(native_state);
+        let result = judge_request(
+            JudgeRunRequest {
+                problem_id: SUPPORTED_PROBLEM_ID.to_owned(),
+                sql: "SELECT e.id AS employee_id, e.name AS employee_name FROM employees AS e WHERE e.salary > (SELECT AVG(peer.salary) FROM employees AS peer WHERE peer.department_id = e.department_id)".to_owned(),
+                mode: "run".to_owned(),
+            },
+            &state,
+            "run",
+        );
+
+        assert_eq!(result.status, "completed");
+        assert_eq!(result.verdict.as_deref(), Some("Accepted"));
+        let submit = judge_request(
+            JudgeRunRequest {
+                problem_id: SUPPORTED_PROBLEM_ID.to_owned(),
+                sql: "SELECT 1".to_owned(),
+                mode: "submit".to_owned(),
+            },
+            &state,
+            "submit",
+        );
+        assert_eq!(submit.status, "completed");
+        assert_eq!(submit.verdict.as_deref(), Some("WrongAnswer"));
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
