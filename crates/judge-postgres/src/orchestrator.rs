@@ -38,9 +38,28 @@ pub fn judge_submission(
     cases: &[JudgeCase<'_>],
     user_sql: &str,
 ) -> SubmissionReport {
+    judge_submission_with_cancel(session, runner_role, cases, user_sql, || false)
+}
+
+pub fn judge_submission_with_cancel<F>(
+    session: &mut PostgresSession,
+    runner_role: &str,
+    cases: &[JudgeCase<'_>],
+    user_sql: &str,
+    is_cancelled: F,
+) -> SubmissionReport
+where
+    F: Fn() -> bool,
+{
     let mut tests = Vec::with_capacity(cases.len());
 
     for case in cases {
+        if is_cancelled() {
+            return SubmissionReport {
+                verdict: Verdict::Cancelled,
+                tests,
+            };
+        }
         let execution = session.with_managed_fixture(
             runner_role,
             case.schema_sql,
@@ -54,6 +73,13 @@ pub fn judge_submission(
                 Ok(FixtureExecution { reference, user })
             },
         );
+
+        if is_cancelled() {
+            return SubmissionReport {
+                verdict: Verdict::Cancelled,
+                tests,
+            };
+        }
 
         let outcome = match execution {
             Err(_) => TestOutcome {

@@ -1,6 +1,7 @@
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, SqlValue, Verdict};
 use judge_postgres::{
     JudgeCase, ManagedEnvironment, PostgresSession, QueryExecutionError, judge_submission,
+    judge_submission_with_cancel,
 };
 use std::io::Write;
 use std::net::TcpListener;
@@ -377,6 +378,35 @@ fn managed_namespace_drop_requires_owned_marker() {
         ),
         Err(QueryExecutionError::RuntimeError)
     );
+}
+
+#[test]
+fn cancellation_stops_before_fixture_execution() {
+    let server = TestServer::start();
+    let mut admin =
+        PostgresSession::connect(&server.admin_connection_string()).expect("connect admin");
+    let report = judge_submission_with_cancel(
+        &mut admin,
+        "sqljudge_runner",
+        &[JudgeCase {
+            id: "cancelled",
+            schema_sql: "CREATE TABLE values_table (id integer);",
+            fixture_sql: "INSERT INTO values_table VALUES (1);",
+            reference_sql: "SELECT id FROM values_table",
+            output: OutputPolicy::new(
+                RowOrder::Ordered,
+                true,
+                true,
+                vec![Column::new("id", LogicalType::Integer)],
+            ),
+            limits: QueryLimits::new(2_000, 10, 64 * 1024),
+        }],
+        "SELECT id FROM values_table",
+        || true,
+    );
+
+    assert_eq!(report.verdict, Verdict::Cancelled);
+    assert!(report.tests.is_empty());
 }
 
 #[test]

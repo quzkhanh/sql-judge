@@ -10,7 +10,9 @@ use thiserror::Error;
 mod orchestrator;
 mod runtime;
 
-pub use orchestrator::{JudgeCase, SubmissionReport, TestOutcome, judge_submission};
+pub use orchestrator::{
+    JudgeCase, SubmissionReport, TestOutcome, judge_submission, judge_submission_with_cancel,
+};
 pub use runtime::ManagedPostgresRuntime;
 
 #[derive(Debug, Error, PartialEq, Eq)]
