@@ -1,6 +1,6 @@
 use app_storage::EnvironmentStore;
 use environment_manager::{
-    EnvironmentLedger, EnvironmentMode, EnvironmentRecord, EnvironmentState,
+    DestructiveAction, EnvironmentLedger, EnvironmentMode, EnvironmentRecord, EnvironmentState,
 };
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, Verdict};
 use judge_postgres::{
@@ -79,6 +79,23 @@ struct CloneEnvironmentRequest {
     source_env_id: String,
     env_id: String,
     namespace: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ResetEnvironmentRequest {
+    env_id: String,
+    instance_id: String,
+    namespace: String,
+    confirmed: bool,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DeleteEnvironmentRequest {
+    env_id: String,
+    instance_id: String,
+    confirmed: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -288,6 +305,190 @@ fn clone_managed_environment_value(
         .clone_environment(&request.source_env_id, replacement)
         .map_err(|_| "Managed environment could not be cloned.".to_owned())?;
     provision_reserved_record(&mut state, record)
+}
+
+fn reset_managed_environment_value(
+    request: ResetEnvironmentRequest,
+    state: &Mutex<ManagedEnvironmentState>,
+) -> Result<ManagedEnvironmentSummary, String> {
+    if request.env_id.trim().is_empty() || request.namespace.trim().is_empty() {
+        return Err("The requested reset identity is invalid.".to_owned());
+    }
+    let mut state = state
+        .lock()
+        .map_err(|_| "Managed environment state is busy.".to_owned())?;
+    ensure_managed_runtime(&mut state)?;
+    let current = state
+        .ledger
+        .inspect(&request.env_id)
+        .map_err(|_| "Managed environment was not found.".to_owned())?
+        .clone();
+    if current.namespace == request.namespace {
+        return Err("Reset requires a replacement namespace.".to_owned());
+    }
+    let action = DestructiveAction::Reset {
+        env_id: request.env_id.clone(),
+        instance_id: request.instance_id,
+        ownership_nonce: current.ownership_nonce.clone(),
+        confirmed: request.confirmed,
+    };
+    state
+        .ledger
+        .begin_rebuild(&request.env_id, action.clone())
+        .map_err(|_| "Managed environment reset authorization failed.".to_owned())?;
+    let rebuilding = state
+        .ledger
+        .inspect(&request.env_id)
+        .map_err(|_| "Managed environment reset state could not be read.".to_owned())?
+        .clone();
+    state
+        .store
+        .save_environment(&rebuilding)
+        .map_err(|_| "Managed environment reset state could not be saved.".to_owned())?;
+
+    let replacement = EnvironmentRecord {
+        env_id: current.env_id.clone(),
+        instance_id: current.instance_id.clone(),
+        pack_id: current.pack_id.clone(),
+        namespace: request.namespace,
+        ownership_nonce: current.ownership_nonce.clone(),
+        mode: EnvironmentMode::Managed,
+        state: EnvironmentState::Ready,
+    };
+    let replacement_environment = ManagedEnvironment::new(
+        replacement.env_id.clone(),
+        replacement.instance_id.clone(),
+        replacement.namespace.clone(),
+        replacement.ownership_nonce.clone(),
+    )
+    .map_err(|_| "Managed replacement identity failed policy validation.".to_owned())?;
+    let old_environment = ManagedEnvironment::new(
+        current.env_id.clone(),
+        current.instance_id.clone(),
+        current.namespace.clone(),
+        current.ownership_nonce.clone(),
+    )
+    .map_err(|_| "Managed environment identity failed policy validation.".to_owned())?;
+    let connection = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| "Managed PostgreSQL runtime is unavailable.".to_owned())?
+        .connection_string();
+    let mut session = PostgresSession::connect(&connection)
+        .map_err(|_| "Managed PostgreSQL runtime connection failed.".to_owned())?;
+    session
+        .provision_managed_namespace_with_schema(
+            &replacement_environment,
+            "sqljudge_runner",
+            SCHEMA_SQL,
+        )
+        .map_err(|_| "Managed replacement schema provisioning failed.".to_owned())?;
+    state
+        .ledger
+        .finish_rebuild(&request.env_id, replacement, action, |_| true)
+        .map_err(|_| "Managed replacement could not enter the ready state.".to_owned())?;
+    let ready = state
+        .ledger
+        .inspect(&request.env_id)
+        .map_err(|_| "Managed replacement state could not be read.".to_owned())?
+        .clone();
+    state
+        .store
+        .save_environment(&ready)
+        .map_err(|_| "Managed replacement state could not be saved.".to_owned())?;
+    if session.drop_managed_namespace(&old_environment).is_err() {
+        state
+            .ledger
+            .mark_error(&request.env_id)
+            .map_err(|_| "Managed reset cleanup failed.".to_owned())?;
+        let error_state = state
+            .ledger
+            .inspect(&request.env_id)
+            .map_err(|_| "Managed reset cleanup state could not be read.".to_owned())?
+            .clone();
+        state
+            .store
+            .save_environment(&error_state)
+            .map_err(|_| "Managed reset cleanup state could not be saved.".to_owned())?;
+        return Err("Managed reset replacement succeeded but old cleanup failed.".to_owned());
+    }
+    environment_summary(&ready)
+}
+
+fn delete_managed_environment_value(
+    request: DeleteEnvironmentRequest,
+    state: &Mutex<ManagedEnvironmentState>,
+) -> Result<(), String> {
+    if request.env_id.trim().is_empty() {
+        return Err("The requested delete identity is invalid.".to_owned());
+    }
+    let mut state = state
+        .lock()
+        .map_err(|_| "Managed environment state is busy.".to_owned())?;
+    ensure_managed_runtime(&mut state)?;
+    let current = state
+        .ledger
+        .inspect(&request.env_id)
+        .map_err(|_| "Managed environment was not found.".to_owned())?
+        .clone();
+    let action = DestructiveAction::Delete {
+        env_id: request.env_id.clone(),
+        instance_id: request.instance_id,
+        ownership_nonce: current.ownership_nonce.clone(),
+        confirmed: request.confirmed,
+    };
+    state
+        .ledger
+        .begin_delete(&request.env_id, action.clone())
+        .map_err(|_| "Managed environment delete authorization failed.".to_owned())?;
+    let deleting = state
+        .ledger
+        .inspect(&request.env_id)
+        .map_err(|_| "Managed environment delete state could not be read.".to_owned())?
+        .clone();
+    state
+        .store
+        .save_environment(&deleting)
+        .map_err(|_| "Managed environment delete state could not be saved.".to_owned())?;
+    let environment = ManagedEnvironment::new(
+        current.env_id.clone(),
+        current.instance_id.clone(),
+        current.namespace.clone(),
+        current.ownership_nonce.clone(),
+    )
+    .map_err(|_| "Managed environment identity failed policy validation.".to_owned())?;
+    let connection = state
+        .runtime
+        .as_ref()
+        .ok_or_else(|| "Managed PostgreSQL runtime is unavailable.".to_owned())?
+        .connection_string();
+    let mut session = PostgresSession::connect(&connection)
+        .map_err(|_| "Managed PostgreSQL runtime connection failed.".to_owned())?;
+    if session.drop_managed_namespace(&environment).is_err() {
+        state
+            .ledger
+            .mark_error(&request.env_id)
+            .map_err(|_| "Managed delete cleanup failed.".to_owned())?;
+        let error_state = state
+            .ledger
+            .inspect(&request.env_id)
+            .map_err(|_| "Managed delete cleanup state could not be read.".to_owned())?
+            .clone();
+        state
+            .store
+            .save_environment(&error_state)
+            .map_err(|_| "Managed delete cleanup state could not be saved.".to_owned())?;
+        return Err("Managed environment cleanup failed.".to_owned());
+    }
+    state
+        .ledger
+        .finish_delete(&request.env_id, action)
+        .map_err(|_| "Managed environment could not be removed from the ledger.".to_owned())?;
+    state
+        .store
+        .delete_environment(&request.env_id)
+        .map_err(|_| "Managed environment could not be removed from storage.".to_owned())?;
+    Ok(())
 }
 
 fn managed_environment_summary(record: &EnvironmentRecord) -> Option<ManagedEnvironmentSummary> {
@@ -539,6 +740,22 @@ fn clone_managed_environment(
 }
 
 #[tauri::command]
+fn reset_managed_environment(
+    request: ResetEnvironmentRequest,
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> Result<ManagedEnvironmentSummary, String> {
+    reset_managed_environment_value(request, state.inner())
+}
+
+#[tauri::command]
+fn delete_managed_environment(
+    request: DeleteEnvironmentRequest,
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> Result<(), String> {
+    delete_managed_environment_value(request, state.inner())
+}
+
+#[tauri::command]
 fn managed_runtime_status(
     state: State<'_, Mutex<ManagedEnvironmentState>>,
 ) -> Result<ManagedRuntimeStatus, String> {
@@ -622,6 +839,8 @@ pub fn run() {
             inspect_managed_environment,
             create_managed_environment,
             clone_managed_environment,
+            reset_managed_environment,
+            delete_managed_environment,
             managed_runtime_status,
             start_managed_runtime
         ])
@@ -638,10 +857,12 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        CloneEnvironmentRequest, CreateEnvironmentRequest, JudgeRunRequest, SUPPORTED_PROBLEM_ID,
-        clone_managed_environment_value, create_managed_environment_value, ensure_managed_runtime,
-        judge_request, load_environment_state, managed_environment_summary,
-        managed_runtime_status_value, unavailable_judge, verdict_name,
+        CloneEnvironmentRequest, CreateEnvironmentRequest, DeleteEnvironmentRequest,
+        JudgeRunRequest, ResetEnvironmentRequest, SUPPORTED_PROBLEM_ID,
+        clone_managed_environment_value, create_managed_environment_value,
+        delete_managed_environment_value, ensure_managed_runtime, judge_request,
+        load_environment_state, managed_environment_summary, managed_runtime_status_value,
+        reset_managed_environment_value, unavailable_judge, verdict_name,
     };
     use std::sync::Mutex;
 
@@ -751,8 +972,36 @@ mod tests {
         assert_eq!(first.state, "ready");
         assert_eq!(second.state, "ready");
         assert_ne!(first.namespace, second.namespace);
+        let reset = reset_managed_environment_value(
+            ResetEnvironmentRequest {
+                env_id: first.env_id.clone(),
+                instance_id: first.instance_id.clone(),
+                namespace: "sj_env_reset".to_owned(),
+                confirmed: true,
+            },
+            &state,
+        )
+        .expect("reset first environment");
+        assert_eq!(reset.state, "ready");
+        delete_managed_environment_value(
+            DeleteEnvironmentRequest {
+                env_id: second.env_id.clone(),
+                instance_id: second.instance_id.clone(),
+                confirmed: true,
+            },
+            &state,
+        )
+        .expect("delete second environment");
         let state_guard = state.lock().expect("lock native state");
-        assert_eq!(state_guard.ledger.list().len(), 2);
+        assert_eq!(state_guard.ledger.list().len(), 1);
+        assert_eq!(
+            state_guard
+                .ledger
+                .inspect(&first.env_id)
+                .expect("reset environment")
+                .namespace,
+            "sj_env_reset"
+        );
         drop(state_guard);
         drop(state);
         let _ = std::fs::remove_dir_all(root);

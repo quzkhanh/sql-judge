@@ -214,6 +214,7 @@ impl EnvironmentLedger {
         if !matches!(
             record.state,
             EnvironmentState::Provisioning
+                | EnvironmentState::Ready
                 | EnvironmentState::Rebuilding
                 | EnvironmentState::Deleting
         ) {
