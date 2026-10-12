@@ -132,6 +132,24 @@ impl ManagedPostgresSession {
         self.session
             .with_managed_fixture(runner_role, schema_sql, fixture_sql, operation)
     }
+
+    pub fn execute(
+        &mut self,
+        sql: &str,
+        limits: QueryLimits,
+    ) -> Result<QueryResult, QueryExecutionError> {
+        self.session.execute(sql, limits)
+    }
+
+    pub fn provision_managed_namespace_with_schema(
+        &mut self,
+        environment: &ManagedEnvironment,
+        runner_role: &str,
+        schema_sql: &str,
+    ) -> Result<(), QueryExecutionError> {
+        self.session
+            .provision_managed_namespace_with_schema(environment, runner_role, schema_sql)
+    }
 }
 
 impl PostgresSession {

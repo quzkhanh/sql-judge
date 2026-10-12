@@ -1,3 +1,4 @@
+use judge_core::{QueryLimits, SqlValue};
 use problem_pack::PackData;
 use problem_pack::PackImporter;
 use std::fs;
@@ -19,6 +20,71 @@ fn managed_pack_session_rejects_database_without_runtime_marker() {
         error,
         judge_postgres::QueryExecutionError::OwnershipVerificationFailed
     );
+}
+
+#[test]
+fn import_into_managed_environment_provisions_pack_schema() {
+    let (_temp, pack) = copy_sample();
+    let data = PackData::from_directory(&pack)
+        .expect("load pack")
+        .validate()
+        .expect("structural validation");
+    let registry = pack.join("registry");
+    let server = LocalPostgres::start();
+    let mut session = server.admin_session();
+    let environment = judge_postgres::ManagedEnvironment::new(
+        "env-import",
+        "test-instance",
+        "sj_import_a",
+        "nonce-import",
+    )
+    .expect("valid managed environment");
+
+    PackImporter::new(&registry)
+        .import_into_managed_environment(&data, &mut session, &environment, "sqljudge_runner")
+        .expect("validate, provision, and publish pack");
+
+    let result = session
+        .execute(
+            "SELECT COUNT(*) FROM \"sj_import_a\".employees",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("read provisioned schema");
+    assert_eq!(result.rows[0][0], SqlValue::Signed(0));
+}
+
+#[test]
+fn failed_managed_schema_provisioning_does_not_publish_pack() {
+    let (_temp, pack) = copy_sample();
+    let data = PackData::from_directory(&pack)
+        .expect("load pack")
+        .validate()
+        .expect("structural validation");
+    let server = LocalPostgres::start();
+    let mut session = server.admin_session();
+    let environment = judge_postgres::ManagedEnvironment::new(
+        "env-import",
+        "test-instance",
+        "sj_import_a",
+        "nonce-import",
+    )
+    .expect("valid managed environment");
+    let first_registry = pack.join("registry-first");
+    PackImporter::new(&first_registry)
+        .import_into_managed_environment(&data, &mut session, &environment, "sqljudge_runner")
+        .expect("first import");
+
+    let second_registry = pack.join("registry-second");
+    assert!(matches!(
+        PackImporter::new(&second_registry).import_into_managed_environment(
+            &data,
+            &mut session,
+            &environment,
+            "sqljudge_runner"
+        ),
+        Err(problem_pack::PackError::EnvironmentProvisioning)
+    ));
+    assert!(!second_registry.exists());
 }
 
 fn sample_path() -> PathBuf {

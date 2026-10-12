@@ -1,5 +1,5 @@
 use judge_core::{Column, Dialect, OutputPolicy, QueryLimits, RowOrder};
-use judge_postgres::ManagedPostgresSession;
+use judge_postgres::{ManagedEnvironment, ManagedPostgresSession};
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -66,6 +66,8 @@ pub enum PackError {
     UnsupportedDialect,
     #[error("runtime validation failed for {problem}/{test}")]
     RuntimeValidation { problem: String, test: String },
+    #[error("managed environment provisioning failed")]
+    EnvironmentProvisioning,
     #[error("immutable pack version conflict for {pack_id} {version}")]
     ImmutableVersionConflict { pack_id: String, version: String },
     #[error("published pack destination is not a directory")]
@@ -279,6 +281,30 @@ impl PackImporter {
             return Err(PackError::UnsupportedDialect);
         }
         validate_runtime(pack, session, runner_role)?;
+        self.publish(pack)
+    }
+
+    pub fn import_into_managed_environment(
+        &self,
+        pack: &ValidatedPack,
+        session: &mut ManagedPostgresSession,
+        environment: &ManagedEnvironment,
+        runner_role: &str,
+    ) -> Result<PublishedPack, PackError> {
+        if pack.manifest.dialect != Dialect::Postgresql {
+            return Err(PackError::UnsupportedDialect);
+        }
+        validate_runtime(pack, session, runner_role)?;
+        let schema_sql = pack
+            .manifest
+            .schema
+            .iter()
+            .map(|path| sql_file(&pack.files, path))
+            .collect::<Result<Vec<_>, _>>()?
+            .join("\n");
+        session
+            .provision_managed_namespace_with_schema(environment, runner_role, &schema_sql)
+            .map_err(|_| PackError::EnvironmentProvisioning)?;
         self.publish(pack)
     }
 
