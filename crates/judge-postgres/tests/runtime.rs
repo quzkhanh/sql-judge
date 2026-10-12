@@ -28,6 +28,29 @@ fn managed_runtime_starts_owned_socket_instance() {
     let _ = fs::remove_dir_all(root);
 }
 
+#[test]
+fn managed_runtime_restarts_only_with_matching_instance_marker() {
+    let root = std::env::temp_dir().join(format!(
+        "sql-judge-runtime-restart-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let runtime =
+        ManagedPostgresRuntime::start(&root, "runtime-restart").expect("start initial runtime");
+    drop(runtime);
+
+    let restarted =
+        ManagedPostgresRuntime::start(&root, "runtime-restart").expect("restart matching runtime");
+    drop(restarted);
+
+    let mismatched = ManagedPostgresRuntime::start(&root, "different-instance");
+    assert!(matches!(
+        mismatched,
+        Err(judge_postgres::QueryExecutionError::OwnershipVerificationFailed)
+    ));
+    let _ = fs::remove_dir_all(root);
+}
+
 fn unique_suffix() -> u128 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)

@@ -1,4 +1,4 @@
-use super::{PostgresSession, QueryExecutionError};
+use super::{ManagedPostgresSession, PostgresSession, QueryExecutionError};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -16,7 +16,11 @@ impl ManagedPostgresRuntime {
         }
 
         let root = root.as_ref().to_path_buf();
-        if !root.is_absolute() || root.exists() {
+        if !root.is_absolute() {
+            return Err(QueryExecutionError::PolicyViolation);
+        }
+        let fresh = !root.exists();
+        if !fresh && !root.join("PG_VERSION").is_file() {
             return Err(QueryExecutionError::PolicyViolation);
         }
         let socket = root.join("socket");
@@ -29,27 +33,34 @@ impl ManagedPostgresRuntime {
 
         let parent = root.parent().ok_or(QueryExecutionError::PolicyViolation)?;
         fs::create_dir_all(parent).map_err(|_| QueryExecutionError::ConnectionError)?;
-        fs::create_dir(&root).map_err(|_| QueryExecutionError::ConnectionError)?;
-
-        let initialized = Command::new("initdb")
-            .args([
-                "-D",
-                root.to_str().ok_or(QueryExecutionError::PolicyViolation)?,
-                "--username",
-                &user,
-                "--auth-local=peer",
-                "--auth-host=reject",
-            ])
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status()
-            .map_err(|_| QueryExecutionError::ConnectionError)?;
-        if !initialized.success() {
-            let _ = fs::remove_dir_all(&root);
-            return Err(QueryExecutionError::ConnectionError);
+        if fresh {
+            fs::create_dir(&root).map_err(|_| QueryExecutionError::ConnectionError)?;
+            let initialized = Command::new("initdb")
+                .args([
+                    "-D",
+                    root.to_str().ok_or(QueryExecutionError::PolicyViolation)?,
+                    "--username",
+                    &user,
+                    "--auth-local=peer",
+                    "--auth-host=reject",
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .map_err(|_| QueryExecutionError::ConnectionError)?;
+            if !initialized.success() {
+                let _ = fs::remove_dir_all(&root);
+                return Err(QueryExecutionError::ConnectionError);
+            }
         }
-        if fs::create_dir(&socket).is_err() {
-            let _ = fs::remove_dir_all(&root);
+        if socket.exists() {
+            if !socket.is_dir() {
+                return Err(QueryExecutionError::PolicyViolation);
+            }
+        } else if fs::create_dir(&socket).is_err() {
+            if fresh {
+                let _ = fs::remove_dir_all(&root);
+            }
             return Err(QueryExecutionError::ConnectionError);
         }
 
@@ -73,12 +84,19 @@ impl ManagedPostgresRuntime {
             .status()
             .map_err(|_| QueryExecutionError::ConnectionError)?;
         if !started.success() {
-            let _ = fs::remove_dir_all(&root);
+            if fresh {
+                let _ = fs::remove_dir_all(&root);
+            }
             return Err(QueryExecutionError::ConnectionError);
         }
 
         let runtime = Self { root, socket, user };
-        if let Err(error) = runtime.initialize(instance_id) {
+        let initialized = if fresh {
+            runtime.initialize(instance_id)
+        } else {
+            ManagedPostgresSession::connect(&runtime.connection_string(), instance_id).map(|_| ())
+        };
+        if let Err(error) = initialized {
             drop(runtime);
             return Err(error);
         }
