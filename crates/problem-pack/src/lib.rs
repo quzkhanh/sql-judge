@@ -1,5 +1,5 @@
 use judge_core::{Column, Dialect, OutputPolicy, QueryLimits, RowOrder};
-use judge_postgres::PostgresSession;
+use judge_postgres::ManagedPostgresSession;
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
@@ -272,7 +272,7 @@ impl PackImporter {
     pub fn import(
         &self,
         pack: &ValidatedPack,
-        session: &mut PostgresSession,
+        session: &mut ManagedPostgresSession,
         runner_role: &str,
     ) -> Result<PublishedPack, PackError> {
         if pack.manifest.dialect != Dialect::Postgresql {
@@ -364,7 +364,7 @@ impl PackImporter {
 
 fn validate_runtime(
     pack: &ValidatedPack,
-    session: &mut PostgresSession,
+    session: &mut ManagedPostgresSession,
     runner_role: &str,
 ) -> Result<(), PackError> {
     let schema_sql = pack
@@ -548,6 +548,10 @@ fn collect_directory(
                 return Err(PackError::ResourceLimit);
             }
             if files.len() >= MAX_FILES {
+                return Err(PackError::ResourceLimit);
+            }
+            let current_size = files.values().map(Vec::len).sum::<usize>();
+            if metadata.len() > (MAX_TOTAL_BYTES - current_size) as u64 {
                 return Err(PackError::ResourceLimit);
             }
             files.insert(name, fs::read(path)?);

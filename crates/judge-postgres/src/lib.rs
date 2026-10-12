@@ -69,6 +69,71 @@ pub struct PostgresSession {
     client: Client,
 }
 
+pub struct ManagedPostgresSession {
+    session: PostgresSession,
+}
+
+impl ManagedPostgresSession {
+    pub fn connect(
+        connection_string: &str,
+        expected_instance_id: &str,
+    ) -> Result<Self, QueryExecutionError> {
+        if expected_instance_id.trim().is_empty() {
+            return Err(QueryExecutionError::PolicyViolation);
+        }
+        let mut session = PostgresSession::connect(connection_string)?;
+        let marker_exists = session
+            .client
+            .query_one(
+                "SELECT EXISTS (
+                     SELECT 1
+                     FROM pg_catalog.pg_class c
+                     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = 'public' AND c.relname = '__sql_judge_runtime'
+                       AND c.relkind IN ('r', 'p')
+                 )",
+                &[],
+            )
+            .map_err(map_database_error)?
+            .get::<_, bool>(0);
+        if !marker_exists {
+            return Err(QueryExecutionError::OwnershipVerificationFailed);
+        }
+        let marker = session
+            .client
+            .query_opt(
+                "SELECT r.instance_id
+                 FROM public.__sql_judge_runtime r
+                 JOIN pg_catalog.pg_class c ON c.relname = '__sql_judge_runtime'
+                 JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                 JOIN pg_catalog.pg_user u ON u.usesysid = c.relowner
+                 WHERE n.nspname = 'public' AND c.relname = '__sql_judge_runtime'
+                   AND u.usename = current_user
+                 LIMIT 1",
+                &[],
+            )
+            .map_err(map_database_error)?;
+        if marker.is_none_or(|row| row.get::<_, String>(0) != expected_instance_id) {
+            return Err(QueryExecutionError::OwnershipVerificationFailed);
+        }
+        Ok(Self { session })
+    }
+
+    pub fn with_managed_fixture<T, F>(
+        &mut self,
+        runner_role: &str,
+        schema_sql: &str,
+        fixture_sql: &str,
+        operation: F,
+    ) -> Result<T, QueryExecutionError>
+    where
+        F: FnOnce(&mut PostgresSession) -> Result<T, QueryExecutionError>,
+    {
+        self.session
+            .with_managed_fixture(runner_role, schema_sql, fixture_sql, operation)
+    }
+}
+
 impl PostgresSession {
     pub fn connect(connection_string: &str) -> Result<Self, QueryExecutionError> {
         if !is_local_connection_string(connection_string) {
@@ -153,7 +218,8 @@ impl PostgresSession {
         let runner_is_constrained = self
             .client
             .query_opt(
-                "SELECT NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb AND NOT rolinherit
+                "SELECT NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb
+                    AND NOT rolinherit AND NOT rolbypassrls AND NOT rolreplication
                  FROM pg_catalog.pg_roles WHERE rolname = $1",
                 &[&runner_role],
             )
@@ -228,7 +294,8 @@ impl PostgresSession {
         let result = (|| {
             let runner_is_constrained = transaction
                 .query_opt(
-                    "SELECT NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb AND NOT rolinherit
+                    "SELECT NOT rolsuper AND NOT rolcreaterole AND NOT rolcreatedb
+                        AND NOT rolinherit AND NOT rolbypassrls AND NOT rolreplication
                      FROM pg_catalog.pg_roles WHERE rolname = $1",
                     &[&runner_role],
                 )
@@ -539,8 +606,9 @@ fn split_setup_statements(sql: &str) -> Result<Vec<String>, QueryExecutionError>
         if in_double_quote {
             if character == '"' {
                 in_double_quote = false;
+            } else {
+                current.push(character.to_ascii_lowercase());
             }
-            current.push(' ');
             continue;
         }
 

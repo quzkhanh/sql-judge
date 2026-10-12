@@ -6,6 +6,21 @@ use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+#[test]
+fn managed_pack_session_rejects_database_without_runtime_marker() {
+    let server = LocalPostgres::start();
+    let error = judge_postgres::ManagedPostgresSession::connect(
+        &server.connection_string(),
+        "test-instance",
+    )
+    .err()
+    .expect("unmarked database must not become a managed pack target");
+    assert_eq!(
+        error,
+        judge_postgres::QueryExecutionError::OwnershipVerificationFailed
+    );
+}
+
 fn sample_path() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/packs/hr-sql-101")
 }
@@ -306,14 +321,43 @@ impl LocalPostgres {
         Self { root, socket, port }
     }
 
-    fn admin_session(&self) -> judge_postgres::PostgresSession {
-        judge_postgres::PostgresSession::connect(&format!(
+    fn connection_string(&self) -> String {
+        format!(
             "host={} port={} user={} dbname=sqljudge_test",
             self.socket.to_str().expect("socket path"),
             self.port,
             std::env::var("USER").expect("USER identifies test owner")
-        ))
-        .expect("connect managed test target")
+        )
+    }
+
+    fn mark_runtime(&self) {
+        let sql = "CREATE TABLE public.__sql_judge_runtime (instance_id text PRIMARY KEY); INSERT INTO public.__sql_judge_runtime (instance_id) VALUES ('test-instance'); REVOKE ALL ON TABLE public.__sql_judge_runtime FROM PUBLIC;";
+        assert!(
+            Command::new("psql")
+                .args([
+                    "-h",
+                    self.socket.to_str().expect("socket path"),
+                    "-p",
+                    &self.port.to_string(),
+                    "-d",
+                    "sqljudge_test",
+                    "-v",
+                    "ON_ERROR_STOP=1",
+                    "-c",
+                    sql,
+                ])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status()
+                .expect("mark managed runtime")
+                .success()
+        );
+    }
+
+    fn admin_session(&self) -> judge_postgres::ManagedPostgresSession {
+        self.mark_runtime();
+        judge_postgres::ManagedPostgresSession::connect(&self.connection_string(), "test-instance")
+            .expect("connect managed test target")
     }
 }
 
