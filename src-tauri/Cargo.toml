@@ -20,6 +20,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 app-storage = { path = "../crates/app-storage" }
 environment-manager = { path = "../crates/environment-manager" }
+judge-postgres = { path = "../crates/judge-postgres" }
 log = "0.4"
 tauri-plugin-log = "2"
 tauri = { version = "2", features = [] }

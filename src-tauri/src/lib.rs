@@ -2,8 +2,9 @@ use app_storage::EnvironmentStore;
 use environment_manager::{
     EnvironmentLedger, EnvironmentMode, EnvironmentRecord, EnvironmentState,
 };
+use judge_postgres::ManagedPostgresRuntime;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::webview::PageLoadEvent;
 use tauri::{Manager, State};
@@ -44,6 +45,17 @@ struct JudgeColumn {
 struct ManagedEnvironmentState {
     _store: EnvironmentStore,
     ledger: EnvironmentLedger,
+    runtime_root: PathBuf,
+    runtime_instance_id: String,
+    runtime: Option<ManagedPostgresRuntime>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ManagedRuntimeStatus {
+    available: bool,
+    state: String,
+    message: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -60,6 +72,9 @@ struct ManagedEnvironmentSummary {
 fn load_environment_state(path: &Path) -> Result<ManagedEnvironmentState, String> {
     let mut store = EnvironmentStore::open(path)
         .map_err(|_| "Managed environment state could not be opened.".to_owned())?;
+    let runtime_instance_id = store
+        .get_or_create_runtime_instance_id()
+        .map_err(|_| "Managed runtime identity could not be persisted.".to_owned())?;
     let mut records = store
         .list_environments()
         .map_err(|_| "Managed environment state could not be read.".to_owned())?;
@@ -79,10 +94,45 @@ fn load_environment_state(path: &Path) -> Result<ManagedEnvironmentState, String
     }
     let ledger = EnvironmentLedger::restore(records)
         .map_err(|_| "Managed environment state failed policy validation.".to_owned())?;
+    let runtime_root = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("postgres-runtime");
     Ok(ManagedEnvironmentState {
         _store: store,
         ledger,
+        runtime_root,
+        runtime_instance_id,
+        runtime: None,
     })
+}
+
+fn managed_runtime_status_value(available: bool) -> ManagedRuntimeStatus {
+    if available {
+        ManagedRuntimeStatus {
+            available: true,
+            state: "running".to_owned(),
+            message: "Managed PostgreSQL runtime is available.".to_owned(),
+        }
+    } else {
+        ManagedRuntimeStatus {
+            available: false,
+            state: "unavailable".to_owned(),
+            message: "Managed PostgreSQL runtime has not been started.".to_owned(),
+        }
+    }
+}
+
+fn ensure_managed_runtime(
+    state: &mut ManagedEnvironmentState,
+) -> Result<ManagedRuntimeStatus, String> {
+    if state.runtime.is_none() {
+        let runtime =
+            ManagedPostgresRuntime::start(&state.runtime_root, &state.runtime_instance_id)
+                .map_err(|_| "Managed PostgreSQL runtime could not be started.".to_owned())?;
+        state.runtime = Some(runtime);
+    }
+    Ok(managed_runtime_status_value(true))
 }
 
 fn managed_environment_summary(record: &EnvironmentRecord) -> Option<ManagedEnvironmentSummary> {
@@ -185,6 +235,26 @@ fn inspect_managed_environment(
         .and_then(managed_environment_summary))
 }
 
+#[tauri::command]
+fn managed_runtime_status(
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> Result<ManagedRuntimeStatus, String> {
+    let state = state
+        .lock()
+        .map_err(|_| "Managed environment state is busy.".to_owned())?;
+    Ok(managed_runtime_status_value(state.runtime.is_some()))
+}
+
+#[tauri::command]
+fn start_managed_runtime(
+    state: State<'_, Mutex<ManagedEnvironmentState>>,
+) -> Result<ManagedRuntimeStatus, String> {
+    let mut state = state
+        .lock()
+        .map_err(|_| "Managed environment state is busy.".to_owned())?;
+    ensure_managed_runtime(&mut state)
+}
+
 fn external_navigation_plugin<R: tauri::Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri::plugin::Builder::<R>::new("external-navigation")
         .on_navigation(|webview, url| {
@@ -246,7 +316,9 @@ pub fn run() {
             run_sample,
             submit_solution,
             list_managed_environments,
-            inspect_managed_environment
+            inspect_managed_environment,
+            managed_runtime_status,
+            start_managed_runtime
         ])
         .on_page_load(|webview, payload| {
             if webview.label() == "main" && matches!(payload.event(), PageLoadEvent::Finished) {
@@ -261,7 +333,8 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::{
-        JudgeRunRequest, load_environment_state, managed_environment_summary, unavailable_judge,
+        JudgeRunRequest, load_environment_state, managed_environment_summary,
+        managed_runtime_status_value, unavailable_judge,
     };
 
     #[test]
@@ -274,6 +347,13 @@ mod tests {
 
         assert_eq!(result.status, "unavailable");
         assert!(result.verdict.is_none());
+    }
+
+    #[test]
+    fn native_runtime_status_is_unavailable_before_explicit_start() {
+        let status = managed_runtime_status_value(false);
+        assert!(!status.available);
+        assert_eq!(status.state, "unavailable");
     }
 
     #[test]
