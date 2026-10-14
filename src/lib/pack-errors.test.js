@@ -1,0 +1,26 @@
+import { describe, expect, test } from "bun:test"
+
+import { readPackImportError } from "./pack-errors"
+
+describe("readPackImportError", () => {
+  test("preserves safe actionable native pack errors", () => {
+    expect(readPackImportError("Pack source could not be loaded.")).toBe(
+      "Pack source could not be loaded."
+    )
+    expect(
+      readPackImportError("Pack runtime validation or publication failed.")
+    ).toBe("Pack runtime validation or publication failed.")
+    expect(
+      readPackImportError({ message: "Pack source could not be loaded." })
+    ).toBe("Pack source could not be loaded.")
+  })
+
+  test("does not expose unknown native error details", () => {
+    expect(readPackImportError("/tmp/secret.sql: password=secret")).toBe(
+      "Pack import failed closed. No unvalidated pack was published."
+    )
+    expect(readPackImportError(new Error("raw native error"))).toBe(
+      "Pack import failed closed. No unvalidated pack was published."
+    )
+  })
+})

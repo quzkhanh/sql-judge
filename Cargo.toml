@@ -5,6 +5,7 @@ members = [
     "crates/app-storage",
     "crates/environment-manager",
     "crates/problem-pack",
+    "crates/judge-sqlserver",
 ]
 exclude = ["src-tauri"]
 resolver = "3"

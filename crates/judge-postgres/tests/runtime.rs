@@ -66,7 +66,13 @@ fn managed_runtime_adopts_owned_process_left_after_app_crash() {
         ManagedPostgresRuntime::start(&root, "runtime-adopt").expect("start initial runtime");
     std::mem::forget(runtime);
 
-    let adopted = ManagedPostgresRuntime::start(&root, "runtime-adopt");
+    let mismatched = ManagedPostgresRuntime::adopt(&root, "different-instance");
+    assert!(matches!(
+        mismatched,
+        Err(judge_postgres::QueryExecutionError::OwnershipVerificationFailed)
+    ));
+
+    let adopted = ManagedPostgresRuntime::adopt(&root, "runtime-adopt");
     match adopted {
         Ok(runtime) => {
             drop(runtime);
@@ -89,6 +95,27 @@ fn managed_runtime_adopts_owned_process_left_after_app_crash() {
             panic!("expected adoption of running managed runtime: {error:?}");
         }
     }
+}
+
+#[test]
+fn managed_runtime_startup_adoption_does_not_start_a_stopped_instance() {
+    let root = std::env::temp_dir().join(format!(
+        "sql-judge-runtime-startup-adopt-{}-{}",
+        std::process::id(),
+        unique_suffix()
+    ));
+    let runtime = ManagedPostgresRuntime::start(&root, "runtime-startup-adopt")
+        .expect("start initial runtime");
+    drop(runtime);
+
+    let adopted = ManagedPostgresRuntime::adopt(&root, "runtime-startup-adopt");
+
+    assert!(matches!(
+        adopted,
+        Err(judge_postgres::QueryExecutionError::ConnectionError)
+    ));
+    assert!(!root.join("postmaster.pid").exists());
+    let _ = fs::remove_dir_all(root);
 }
 
 fn unique_suffix() -> u128 {

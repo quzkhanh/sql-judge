@@ -1,7 +1,9 @@
 use app_storage::{
-    EnvironmentStore, HistoryStore, RecoveryOperation, RecoveryRecord, SubmissionRecord, TestRecord,
+    ConnectionProfile, EnvironmentStore, HistoryStore, RecoveryOperation, RecoveryRecord,
+    SubmissionRecord, TestRecord, export_backup, restore_backup,
 };
 use environment_manager::{EnvironmentMode, EnvironmentRecord, EnvironmentState};
+use rusqlite::Connection;
 
 fn record(id: &str) -> SubmissionRecord {
     SubmissionRecord {
@@ -29,11 +31,63 @@ fn environment(id: &str, state: EnvironmentState) -> EnvironmentRecord {
         env_id: id.to_owned(),
         instance_id: format!("instance-{id}"),
         pack_id: "hr-sql-101".to_owned(),
+        pack_version: "1.0.0".to_owned(),
+        pack_digest: "a".repeat(64),
         namespace: format!("sj_{id}").replace('-', "_"),
         ownership_nonce: format!("nonce-{id}"),
         mode: EnvironmentMode::Managed,
         state,
     }
+}
+
+fn connection_profile(id: &str) -> ConnectionProfile {
+    ConnectionProfile {
+        profile_id: id.to_owned(),
+        display_name: "Training database".to_owned(),
+        engine: "postgresql".to_owned(),
+        host: "db.example.test".to_owned(),
+        port: 5432,
+        database: "training".to_owned(),
+        username: "explorer".to_owned(),
+        tls_mode: "verify_full".to_owned(),
+        secret_ref: Some(format!("vault://sql-judge/{id}")),
+    }
+}
+
+#[test]
+fn environment_identity_columns_migrate_existing_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-environment-migration-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let connection = Connection::open(&path).expect("open legacy database");
+    connection
+        .execute_batch(
+            "CREATE TABLE environment_ledger (
+                 env_id TEXT PRIMARY KEY NOT NULL,
+                 instance_id TEXT NOT NULL,
+                 pack_id TEXT NOT NULL,
+                 namespace TEXT NOT NULL UNIQUE,
+                 ownership_nonce TEXT NOT NULL,
+                 mode TEXT NOT NULL,
+                 state TEXT NOT NULL
+             );
+             INSERT INTO environment_ledger VALUES
+                 ('legacy', 'instance', 'hr-sql-101', 'sj_legacy', 'nonce', 'managed', 'ready');",
+        )
+        .expect("create legacy schema");
+    drop(connection);
+
+    let environments = EnvironmentStore::open(&path).expect("migrate environment store");
+    let legacy = environments
+        .get_environment("legacy")
+        .expect("read legacy environment")
+        .expect("legacy environment exists");
+    assert!(legacy.pack_version.is_empty());
+    assert!(legacy.pack_digest.is_empty());
+    drop(environments);
+    let _ = std::fs::remove_file(path);
 }
 
 #[test]
@@ -200,6 +254,366 @@ fn environment_store_rejects_unowned_namespace_names() {
             .expect("query environments")
             .is_none()
     );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn connection_profile_metadata_survives_reopen_without_secret_value() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-connection-profile-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+
+    {
+        let mut store = EnvironmentStore::open(&path).expect("open profiles");
+        store
+            .save_connection_profile(&connection_profile("profile-a"))
+            .expect("save profile");
+    }
+
+    let store = EnvironmentStore::open(&path).expect("reopen profiles");
+    let profiles = store.list_connection_profiles().expect("list profiles");
+    assert_eq!(profiles, vec![connection_profile("profile-a")]);
+    let encoded = serde_json::to_string(&profiles).expect("encode profiles");
+    assert!(!encoded.contains("password"));
+    assert!(!encoded.contains("super-secret"));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn connection_profile_validation_rejects_unsafe_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-connection-profile-invalid-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut store = EnvironmentStore::open(&path).expect("open profiles");
+    let mut invalid = connection_profile("profile-invalid");
+    invalid.port = 0;
+    assert!(matches!(
+        store.save_connection_profile(&invalid),
+        Err(app_storage::StorageError::InvalidConnectionProfile("port"))
+    ));
+    invalid.port = 5432;
+    invalid.profile_id = "profile/invalid".to_owned();
+    assert!(matches!(
+        store.save_connection_profile(&invalid),
+        Err(app_storage::StorageError::InvalidConnectionProfile(
+            "profile id"
+        ))
+    ));
+    invalid.profile_id = "profile-invalid".to_owned();
+    invalid.tls_mode = "disable".to_owned();
+    assert!(matches!(
+        store.save_connection_profile(&invalid),
+        Err(app_storage::StorageError::InvalidConnectionProfile(
+            "tls mode"
+        ))
+    ));
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn connection_profile_delete_removes_only_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-connection-profile-delete-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut store = EnvironmentStore::open(&path).expect("open profiles");
+    store
+        .save_connection_profile(&connection_profile("profile-delete"))
+        .expect("save profile");
+    store
+        .delete_connection_profile("profile-delete")
+        .expect("delete profile");
+    assert!(
+        store
+            .get_connection_profile("profile-delete")
+            .expect("read deleted profile")
+            .is_none()
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn backup_roundtrip_excludes_secrets_and_restores_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-backup-roundtrip-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+
+    {
+        let mut environments = EnvironmentStore::open(&path).expect("open environments");
+        environments
+            .save_environment(&environment("env-backup", EnvironmentState::Ready))
+            .expect("save environment");
+        environments
+            .save_environment(&EnvironmentRecord {
+                env_id: "external-backup".to_owned(),
+                instance_id: "external-instance".to_owned(),
+                pack_id: "external".to_owned(),
+                pack_version: String::new(),
+                pack_digest: String::new(),
+                namespace: "sj_external".to_owned(),
+                ownership_nonce: "external-nonce".to_owned(),
+                mode: EnvironmentMode::ExternalExplorer,
+                state: EnvironmentState::Ready,
+            })
+            .expect("save external environment");
+        environments
+            .save_connection_profile(&connection_profile("profile-backup"))
+            .expect("save external profile");
+        let mut history = HistoryStore::open(&path).expect("open history");
+        history
+            .save_submission(&record("submission-backup"), &[test_record("basic")])
+            .expect("save submission");
+    }
+
+    let mut snapshot = export_backup(&path).expect("export backup");
+    snapshot
+        .environments
+        .retain(|environment| environment.env_id != "external-backup");
+    let encoded = serde_json::to_string(&snapshot).expect("encode backup");
+    assert!(!encoded.contains("password"));
+    assert!(!encoded.contains("secret_ref"));
+    assert!(!encoded.contains("SELECT"));
+    assert_eq!(snapshot.submissions[0].pack_id, "hr-sql-101");
+    assert_eq!(snapshot.submissions[0].pack_version, "1.0.0");
+    assert_eq!(snapshot.submissions[0].pack_hash, "sha256:test");
+    assert!(!encoded.contains("schema_sql"));
+    assert!(!encoded.contains("registry"));
+    assert!(!encoded.contains("files"));
+
+    let mut changed_version = snapshot.clone();
+    changed_version.environments[0].pack_version = "9.9.9".to_owned();
+    assert!(restore_backup(&path, &changed_version).is_err());
+    let preserved = EnvironmentStore::open(&path)
+        .expect("reopen after version rejection")
+        .get_environment("env-backup")
+        .expect("read preserved environment")
+        .expect("preserved environment exists");
+    assert_eq!(preserved.pack_version, "1.0.0");
+
+    let mut changed_digest = snapshot.clone();
+    changed_digest.environments[0].pack_digest = "b".repeat(64);
+    assert!(restore_backup(&path, &changed_digest).is_err());
+    let preserved = EnvironmentStore::open(&path)
+        .expect("reopen after digest rejection")
+        .get_environment("env-backup")
+        .expect("read preserved environment")
+        .expect("preserved environment exists");
+    assert!(
+        preserved
+            .pack_digest
+            .chars()
+            .all(|character| character == 'a')
+    );
+
+    let embedded_pack_payload = encoded.replace(
+        "\"submissions\":[",
+        "\"submissions\":[{\"schemaSql\":\"DROP TABLE users\"},",
+    );
+    assert!(serde_json::from_str::<app_storage::BackupSnapshot>(&embedded_pack_payload).is_err());
+
+    let mut invalid_version = snapshot.clone();
+    invalid_version.version = 3;
+    assert!(restore_backup(&path, &invalid_version).is_err());
+
+    restore_backup(&path, &snapshot).expect("restore backup");
+    let environments = EnvironmentStore::open(&path).expect("reopen environments");
+    let history = HistoryStore::open(&path).expect("reopen history");
+    assert_eq!(
+        environments
+            .list_environments()
+            .expect("list environments")
+            .len(),
+        2
+    );
+    assert_eq!(
+        environments
+            .get_environment("external-backup")
+            .expect("read external environment")
+            .expect("external environment remains")
+            .mode,
+        EnvironmentMode::ExternalExplorer
+    );
+    assert_eq!(
+        environments
+            .list_connection_profiles()
+            .expect("list external profiles")
+            .iter()
+            .map(|profile| profile.profile_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["profile-backup"]
+    );
+    assert_eq!(
+        history.list_submissions().expect("list submissions").len(),
+        1
+    );
+    assert_eq!(
+        history
+            .test_count("submission-backup")
+            .expect("count tests"),
+        1
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn backup_export_rejects_pending_recovery_without_changing_metadata() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-backup-pending-recovery-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut environments = EnvironmentStore::open(&path).expect("open environments");
+    environments
+        .save_environment(&environment("env-pending", EnvironmentState::Ready))
+        .expect("save environment");
+    environments
+        .save_recovery(&RecoveryRecord {
+            env_id: "env-pending".to_owned(),
+            operation: RecoveryOperation::Rebuild,
+            instance_id: "instance-env-pending".to_owned(),
+            ownership_nonce: "nonce-env-pending".to_owned(),
+            namespace: "sj_env_pending".to_owned(),
+            replacement_namespace: Some("sj_env_pending_next".to_owned()),
+        })
+        .expect("save recovery");
+    let mut history = HistoryStore::open(&path).expect("open history");
+    history
+        .save_submission(&record("pending-submission"), &[test_record("basic")])
+        .expect("save history");
+
+    assert!(matches!(
+        export_backup(&path),
+        Err(app_storage::StorageError::InvalidEnvironment(
+            "pending environment recovery"
+        ))
+    ));
+    assert_eq!(
+        EnvironmentStore::open(&path)
+            .expect("reopen environments")
+            .list_recoveries()
+            .expect("list recoveries")
+            .len(),
+        1
+    );
+    assert_eq!(
+        HistoryStore::open(&path)
+            .expect("reopen history")
+            .list_submissions()
+            .expect("list history")
+            .len(),
+        1
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn malformed_backup_environment_is_rejected_before_replacement() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-backup-invalid-environment-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+
+    {
+        let mut environments = EnvironmentStore::open(&path).expect("open environments");
+        environments
+            .save_environment(&environment("env-existing", EnvironmentState::Ready))
+            .expect("save environment");
+        let mut history = HistoryStore::open(&path).expect("open history");
+        history
+            .save_submission(&record("submission-existing"), &[test_record("basic")])
+            .expect("save submission");
+    }
+
+    let mut snapshot = export_backup(&path).expect("export backup");
+    snapshot.environments[0].namespace = "public".to_owned();
+    assert!(restore_backup(&path, &snapshot).is_err());
+
+    let environments = EnvironmentStore::open(&path).expect("reopen environments");
+    let history = HistoryStore::open(&path).expect("reopen history");
+    assert_eq!(
+        environments
+            .get_environment("env-existing")
+            .expect("read existing environment")
+            .expect("existing environment remains")
+            .namespace,
+        "sj_env_existing"
+    );
+    assert_eq!(
+        history
+            .list_submissions()
+            .expect("read existing history")
+            .len(),
+        1
+    );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn backup_rejects_unstable_managed_environment_states() {
+    for state in [
+        EnvironmentState::Provisioning,
+        EnvironmentState::Running,
+        EnvironmentState::Rebuilding,
+        EnvironmentState::Deleting,
+        EnvironmentState::NeedsRecovery,
+    ] {
+        let path = std::env::temp_dir().join(format!(
+            "sql-judge-backup-unstable-{}-{}",
+            std::process::id(),
+            state as u8
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut environments = EnvironmentStore::open(&path).expect("open environments");
+        environments
+            .save_environment(&environment("env-unstable", state))
+            .expect("save unstable environment");
+
+        assert!(matches!(
+            export_backup(&path),
+            Err(app_storage::StorageError::InvalidEnvironment(
+                "environment state"
+            ))
+        ));
+        let _ = std::fs::remove_file(path);
+    }
+}
+
+#[test]
+fn backup_restore_rejects_unstable_managed_environment_states() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-backup-restore-unstable-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut environments = EnvironmentStore::open(&path).expect("open environments");
+    environments
+        .save_environment(&environment("env-unstable", EnvironmentState::Ready))
+        .expect("save ready environment");
+    let mut snapshot = export_backup(&path).expect("export backup");
+
+    for state in [
+        "provisioning",
+        "running",
+        "rebuilding",
+        "deleting",
+        "needs_recovery",
+    ] {
+        snapshot.environments[0].state = state.to_owned();
+        assert!(matches!(
+            restore_backup(&path, &snapshot),
+            Err(app_storage::StorageError::InvalidEnvironment(
+                "environment state"
+            ))
+        ));
+    }
     let _ = std::fs::remove_file(path);
 }
 

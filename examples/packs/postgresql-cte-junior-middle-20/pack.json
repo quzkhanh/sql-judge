@@ -1,0 +1,31 @@
+{
+  "spec_version": "sqljudge.pack/v1",
+  "id": "postgresql-cte-junior-middle-20",
+  "version": "1.0.0",
+  "title": "PostgreSQL CTE Mastery — 20 Labs (Junior to Middle)",
+  "dialect": "postgresql",
+  "min_engine_version": "15",
+  "schema": ["schema/001_tables.sql"],
+  "problems": [
+    "problems/01-eligible-task-filter/problem.json",
+    "problems/02-above-project-average/problem.json",
+    "problems/03-project-status-summary/problem.json",
+    "problems/04-projects-above-average-count/problem.json",
+    "problems/05-users-multiple-active-tasks/problem.json",
+    "problems/06-projects-without-completions/problem.json",
+    "problems/07-task-capacity/problem.json",
+    "problems/08-largest-estimate-per-project/problem.json",
+    "problems/09-latest-assignment-per-user/problem.json",
+    "problems/10-second-newest-task/problem.json",
+    "problems/11-daily-running-hours/problem.json",
+    "problems/12-monthly-net-cashflow/problem.json",
+    "problems/13-project-estimate-overrun/problem.json",
+    "problems/14-import-dedup-winner/problem.json",
+    "problems/15-import-quality-report/problem.json",
+    "problems/16-project-hours-leaderboard/problem.json",
+    "problems/17-user-work-inactivity-gaps/problem.json",
+    "problems/18-task-forest-depths/problem.json",
+    "problems/19-descendant-effort-per-root/problem.json",
+    "problems/20-next-assignable-task/problem.json"
+  ]
+}

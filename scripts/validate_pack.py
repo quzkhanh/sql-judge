@@ -17,13 +17,24 @@ except ImportError as exc:
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_FILES = 2000
+MAX_ENTRIES = 4096
 MAX_FILE_BYTES = 1 * 1024 * 1024
 MAX_TOTAL_BYTES = 32 * 1024 * 1024
+MAX_COMPRESSED_BYTES = 8 * 1024 * 1024
+MAX_RELATIVE_PATH_BYTES = 512
+MAX_PATH_DEPTH = 16
 ALLOWED_MISC = {"README.md", "LICENSE"}
 
 
 def safe_name(name: str) -> bool:
-    if not name or "\\" in name or "\x00" in name or name.startswith("/"):
+    if (
+        not name
+        or len(name.encode("utf-8")) > MAX_RELATIVE_PATH_BYTES
+        or name.count("/") + 1 > MAX_PATH_DEPTH
+        or "\\" in name
+        or "\x00" in name
+        or name.startswith("/")
+    ):
         return False
     if re.match(r"^[a-zA-Z]:", name):
         return False
@@ -39,18 +50,30 @@ def load_folder(folder: Path, problems: list[str]) -> dict[str, bytes]:
         return {}
     files: dict[str, bytes] = {}
     total = 0
+    entries = 0
     for entry in sorted(folder.rglob("*")):
+        entries += 1
+        if entries > MAX_ENTRIES:
+            problems.append("Too many filesystem entries")
+            break
         if entry.is_symlink():
             problems.append(f"Symlink forbidden: {entry.relative_to(folder)}")
+            continue
+        name = entry.relative_to(folder).as_posix()
+        if not safe_name(name):
+            problems.append(f"Unsafe path: {name}")
             continue
         if entry.is_dir():
             continue
         if not entry.is_file():
             problems.append(f"Non-regular file forbidden: {entry.relative_to(folder)}")
             continue
-        name = entry.relative_to(folder).as_posix()
-        if not safe_name(name):
-            problems.append(f"Unsafe file name: {name}")
+        try:
+            if entry.stat().st_nlink > 1:
+                problems.append(f"Hard link forbidden: {name}")
+                continue
+        except OSError as exc:
+            problems.append(f"File metadata unavailable: {name}: {exc}")
             continue
         size = entry.stat().st_size
         total += size
@@ -67,14 +90,19 @@ def load_folder(folder: Path, problems: list[str]) -> dict[str, bytes]:
 def load_zip(path: Path, problems: list[str]) -> dict[str, bytes]:
     files: dict[str, bytes] = {}
     total = 0
+    compressed_total = 0
     try:
         with ZipFile(path) as zf:
-            if len(zf.infolist()) > MAX_FILES:
+            if len(zf.infolist()) > MAX_ENTRIES:
                 problems.append("Too many ZIP entries")
                 return {}
             seen: set[str] = set()
             for info in zf.infolist():
                 name = info.filename
+                compressed_total += info.compress_size
+                if compressed_total > MAX_COMPRESSED_BYTES:
+                    problems.append("Compressed ZIP exceeds limit")
+                    break
                 if info.is_dir():
                     if not safe_name(name.rstrip("/")):
                         problems.append(f"Unsafe directory entry: {name}")
@@ -144,7 +172,11 @@ def validate(files: dict[str, bytes]) -> list[str]:
         folded.add(name.casefold())
         if len(content) > MAX_FILE_BYTES:
             errors.append(f"Excessive file size: {name}")
-    if len(files) > MAX_FILES or sum(len(v) for v in files.values()) > MAX_TOTAL_BYTES:
+    if (
+        len(files) > MAX_FILES
+        or len(files) > MAX_ENTRIES
+        or sum(len(v) for v in files.values()) > MAX_TOTAL_BYTES
+    ):
         errors.append("Pack resource limits exceeded")
     pack = json_file(files, "pack.json", errors)
     if pack is None:

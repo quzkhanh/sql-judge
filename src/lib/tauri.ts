@@ -7,9 +7,22 @@ import {
   serializeError,
 } from "./debug-events"
 
-const JUDGE_COMMANDS = new Set(["run_sample", "submit_solution"])
+const JUDGE_COMMANDS = new Set([
+  "run_sample",
+  "submit_solution",
+  "execute_external_select",
+])
 
-function debugInvokeArgs(command: string, args: InvokeArgs | undefined) {
+export function serializeDebugInvokeArgs(
+  command: string,
+  args: InvokeArgs | undefined
+) {
+  if (command === "restore_backup") {
+    return { snapshotJson: "[redacted backup JSON]" }
+  }
+  if (command === "export_backup") {
+    return "[redacted backup args]"
+  }
   if (!JUDGE_COMMANDS.has(command) || !args || typeof args !== "object") {
     return serializeDebugValue(args)
   }
@@ -24,7 +37,10 @@ function debugInvokeArgs(command: string, args: InvokeArgs | undefined) {
   })
 }
 
-function debugInvokeResult(command: string, result: unknown) {
+export function serializeDebugInvokeResult(command: string, result: unknown) {
+  if (command === "export_backup") {
+    return "[redacted backup snapshot]"
+  }
   if (!JUDGE_COMMANDS.has(command) || !result || typeof result !== "object") {
     return serializeDebugValue(result)
   }
@@ -48,10 +64,10 @@ export async function trackedInvoke<T>(command: string, args?: InvokeArgs) {
       id: crypto.randomUUID(),
       kind: "invoke",
       command,
-      args: debugInvokeArgs(command, args),
+      args: serializeDebugInvokeArgs(command, args),
       durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
       status: "success",
-      result: debugInvokeResult(command, result),
+      result: serializeDebugInvokeResult(command, result),
       timestamp: new Date().toISOString(),
     })
 
@@ -61,7 +77,7 @@ export async function trackedInvoke<T>(command: string, args?: InvokeArgs) {
       id: crypto.randomUUID(),
       kind: "invoke",
       command,
-      args: debugInvokeArgs(command, args),
+      args: serializeDebugInvokeArgs(command, args),
       durationMs: Math.round((performance.now() - startedAt) * 100) / 100,
       status: "error",
       error: serializeError(error),

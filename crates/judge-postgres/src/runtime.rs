@@ -11,6 +11,54 @@ pub struct ManagedPostgresRuntime {
 }
 
 impl ManagedPostgresRuntime {
+    pub fn adopt(root: impl AsRef<Path>, instance_id: &str) -> Result<Self, QueryExecutionError> {
+        if instance_id.trim().is_empty() {
+            return Err(QueryExecutionError::PolicyViolation);
+        }
+
+        let root = root.as_ref().to_path_buf();
+        if !root.exists() {
+            return Err(QueryExecutionError::ConnectionError);
+        }
+        if !root.is_absolute() || !root.join("PG_VERSION").is_file() {
+            return Err(QueryExecutionError::PolicyViolation);
+        }
+        let socket = root.join("socket");
+        if !socket.is_dir() {
+            return Err(QueryExecutionError::PolicyViolation);
+        }
+        let user = std::env::var("USER")
+            .or_else(|_| std::env::var("USERNAME"))
+            .map_err(|_| QueryExecutionError::ConnectionError)?;
+        if user.trim().is_empty() {
+            return Err(QueryExecutionError::ConnectionError);
+        }
+
+        let root_string = root.to_str().ok_or(QueryExecutionError::PolicyViolation)?;
+        let running = Command::new("pg_ctl")
+            .args(["-D", root_string, "status"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|status| status.success());
+        if !running {
+            return Err(QueryExecutionError::ConnectionError);
+        }
+
+        let connection_string = format!(
+            "host={} user={} dbname=postgres",
+            socket.to_string_lossy(),
+            user
+        );
+        ManagedPostgresSession::connect(&connection_string, instance_id)?;
+        Ok(Self {
+            root,
+            socket,
+            user,
+            stop_on_drop: true,
+        })
+    }
+
     pub fn start(root: impl AsRef<Path>, instance_id: &str) -> Result<Self, QueryExecutionError> {
         if instance_id.trim().is_empty() {
             return Err(QueryExecutionError::PolicyViolation);

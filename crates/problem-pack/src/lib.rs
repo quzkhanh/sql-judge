@@ -1,16 +1,27 @@
 use judge_core::{Column, Dialect, OutputPolicy, QueryLimits, RowOrder};
-use judge_postgres::{ManagedEnvironment, ManagedPostgresSession};
-use serde::Deserialize;
+use judge_postgres::{ManagedEnvironment, ManagedPostgresSession, validate_setup_sql};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io::Read;
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
+#[cfg(windows)]
+use std::os::windows::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
+use zip::ZipArchive;
 
 const MAX_FILES: usize = 2_000;
+const MAX_ENTRIES: usize = 4_096;
 const MAX_FILE_BYTES: usize = 1024 * 1024;
 const MAX_TOTAL_BYTES: usize = 32 * 1024 * 1024;
+const MAX_COMPRESSED_BYTES: usize = 8 * 1024 * 1024;
+const MAX_COMPRESSION_RATIO: u64 = 1_000;
+const MAX_RELATIVE_PATH_BYTES: usize = 512;
+const MAX_PATH_DEPTH: usize = 16;
 
 #[derive(Debug, Clone)]
 pub struct PackData {
@@ -22,6 +33,160 @@ pub struct ValidatedPack {
     files: BTreeMap<String, Vec<u8>>,
     manifest: PackManifest,
     digest: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackCatalogEntry {
+    pub pack_id: String,
+    pub version: String,
+    pub title: String,
+    pub dialect: String,
+    pub digest: String,
+    pub problems: Vec<ProblemCatalogEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProblemCatalogEntry {
+    pub id: String,
+    pub title: String,
+    pub difficulty: String,
+    pub dialect: String,
+    pub topics: Vec<String>,
+    pub statement: String,
+    pub schema: Vec<CatalogTable>,
+    pub sample_rows: Vec<BTreeMap<String, serde_json::Value>>,
+    pub starter_sql: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CatalogTable {
+    pub name: String,
+    pub columns: Vec<CatalogColumn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CatalogColumn {
+    pub name: String,
+    pub r#type: String,
+    pub nullable: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ValidatedProblem {
+    pub id: String,
+    pub dialect: Dialect,
+    pub schema_sql: String,
+    pub reference_sql: String,
+    pub output: OutputPolicy,
+    pub limits: QueryLimits,
+    pub tests: Vec<ValidatedTest>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ValidatedTest {
+    pub id: String,
+    pub hidden: bool,
+    pub fixture_sql: String,
+}
+
+impl ValidatedPack {
+    pub fn id(&self) -> &str {
+        &self.manifest.id
+    }
+
+    pub fn version(&self) -> &str {
+        &self.manifest.version
+    }
+
+    pub fn digest(&self) -> &str {
+        &self.digest
+    }
+
+    pub fn schema_sql(&self) -> Result<String, PackError> {
+        self.manifest
+            .schema
+            .iter()
+            .map(|path| sql_file(&self.files, path))
+            .collect::<Result<Vec<_>, _>>()
+            .map(|files| files.join("\n"))
+    }
+
+    pub fn problem(&self, problem_id: &str) -> Result<Option<ValidatedProblem>, PackError> {
+        let Some(problem_path) = self.manifest.problems.iter().find(|path| {
+            json_file::<ProblemManifest>(&self.files, path)
+                .map(|problem| problem.id == problem_id)
+                .unwrap_or(false)
+        }) else {
+            return Ok(None);
+        };
+        let problem: ProblemManifest = json_file(&self.files, problem_path)?;
+        let root = Path::new(problem_path)
+            .parent()
+            .unwrap_or_else(|| Path::new(""));
+        let reference_path = root.join(&problem.reference).to_string_lossy().into_owned();
+        let tests = problem
+            .tests
+            .iter()
+            .map(|test| {
+                let fixture_path = root.join(&test.file).to_string_lossy().into_owned();
+                Ok(ValidatedTest {
+                    id: test.id.clone(),
+                    hidden: test.hidden,
+                    fixture_sql: sql_file(&self.files, &fixture_path)?,
+                })
+            })
+            .collect::<Result<Vec<_>, PackError>>()?;
+
+        Ok(Some(ValidatedProblem {
+            id: problem.id,
+            dialect: problem.dialect,
+            schema_sql: self.schema_sql()?,
+            reference_sql: sql_file(&self.files, &reference_path)?,
+            output: OutputPolicy::new(
+                problem.output.row_order,
+                problem.output.strict_column_names,
+                problem.output.strict_column_types,
+                problem.output.columns,
+            ),
+            limits: problem.limits,
+            tests,
+        }))
+    }
+
+    pub fn catalog_entry(&self) -> Result<PackCatalogEntry, PackError> {
+        let problems = self
+            .manifest
+            .problems
+            .iter()
+            .map(|path| {
+                let problem: ProblemManifest = json_file(&self.files, path)?;
+                let schema = catalog_schema(&problem)?;
+                let sample_rows = catalog_sample_rows(&problem)?;
+                let starter_sql = catalog_starter_sql(&problem)?;
+                Ok(ProblemCatalogEntry {
+                    id: problem.id,
+                    title: problem.title,
+                    difficulty: format!("{:?}", problem.difficulty).to_lowercase(),
+                    dialect: dialect_name(problem.dialect),
+                    topics: problem.topics,
+                    statement: problem.statement,
+                    schema,
+                    sample_rows,
+                    starter_sql,
+                })
+            })
+            .collect::<Result<Vec<_>, PackError>>()?;
+        Ok(PackCatalogEntry {
+            pack_id: self.id().to_owned(),
+            version: self.version().to_owned(),
+            title: self.manifest.title.clone(),
+            dialect: dialect_name(self.manifest.dialect),
+            digest: self.digest().to_owned(),
+            problems,
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +207,8 @@ pub enum PackError {
     SourceNotDirectory,
     #[error("pack contains a symlink: {0}")]
     Symlink(String),
+    #[error("pack contains a hard link: {0}")]
+    HardLink(String),
     #[error("pack contains an unsafe path: {0}")]
     UnsafePath(String),
     #[error("pack contains a non-regular file: {0}")]
@@ -52,6 +219,8 @@ pub enum PackError {
     ResourceLimit,
     #[error("pack filesystem operation failed")]
     Io(#[from] std::io::Error),
+    #[error("pack ZIP archive is invalid")]
+    Zip(#[from] zip::result::ZipError),
     #[error("invalid JSON in {file}")]
     InvalidJson { file: String },
     #[error("invalid pack manifest: {0}")]
@@ -103,6 +272,35 @@ struct ProblemManifest {
     output: OutputManifest,
     limits: QueryLimits,
     tests: Vec<TestManifest>,
+    #[serde(default)]
+    catalog: Option<CatalogManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogManifest {
+    #[serde(default)]
+    schema: Vec<CatalogTableManifest>,
+    #[serde(default)]
+    sample_rows: Vec<BTreeMap<String, serde_json::Value>>,
+    #[serde(default)]
+    starter_sql: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogTableManifest {
+    name: String,
+    columns: Vec<CatalogColumnManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogColumnManifest {
+    name: String,
+    r#type: String,
+    #[serde(default)]
+    nullable: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -145,8 +343,98 @@ impl PackData {
         }
 
         let mut files = BTreeMap::new();
-        collect_directory(root, root, &mut files)?;
+        let mut entry_count = 0;
+        collect_directory(root, root, &mut files, &mut entry_count, 0)?;
         Ok(Self { files })
+    }
+
+    pub fn from_path(path: impl AsRef<Path>) -> Result<Self, PackError> {
+        let path = path.as_ref();
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.is_dir() {
+            return Self::from_directory(path);
+        }
+        if metadata.is_file()
+            && path
+                .extension()
+                .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"))
+        {
+            return Self::from_zip(path);
+        }
+        Err(PackError::SourceNotDirectory)
+    }
+
+    pub fn from_zip(path: impl AsRef<Path>) -> Result<Self, PackError> {
+        let file = fs::File::open(path)?;
+        let mut archive = ZipArchive::new(file)?;
+        if archive.len() > MAX_ENTRIES {
+            return Err(PackError::ResourceLimit);
+        }
+
+        let mut entries = Vec::new();
+        let mut total_bytes = 0usize;
+        let mut compressed_bytes = 0usize;
+        let mut file_count = 0usize;
+        for index in 0..archive.len() {
+            let entry = archive.by_index(index)?;
+            let raw_name = entry.name()?.into_owned();
+            let name = raw_name.trim_end_matches('/');
+            compressed_bytes = compressed_bytes
+                .checked_add(
+                    usize::try_from(entry.compressed_size())
+                        .map_err(|_| PackError::ResourceLimit)?,
+                )
+                .ok_or(PackError::ResourceLimit)?;
+            if compressed_bytes > MAX_COMPRESSED_BYTES {
+                return Err(PackError::ResourceLimit);
+            }
+            validate_path(name)?;
+            if name.split('/').count() > MAX_PATH_DEPTH {
+                return Err(PackError::ResourceLimit);
+            }
+            if entry.is_dir() {
+                continue;
+            }
+            if entry.is_symlink() {
+                return Err(PackError::Symlink(raw_name));
+            }
+            if !entry.is_file() {
+                return Err(PackError::NonRegularFile(raw_name));
+            }
+
+            file_count += 1;
+            if file_count > MAX_FILES {
+                return Err(PackError::ResourceLimit);
+            }
+            let uncompressed_size = entry.size();
+            let compressed_size = entry.compressed_size();
+            if uncompressed_size > MAX_FILE_BYTES as u64
+                || (uncompressed_size > 0
+                    && (compressed_size == 0
+                        || compressed_size
+                            .checked_mul(MAX_COMPRESSION_RATIO)
+                            .is_none_or(|limit| uncompressed_size > limit)))
+            {
+                return Err(PackError::ResourceLimit);
+            }
+            total_bytes = total_bytes
+                .checked_add(uncompressed_size as usize)
+                .ok_or(PackError::ResourceLimit)?;
+            if total_bytes > MAX_TOTAL_BYTES {
+                return Err(PackError::ResourceLimit);
+            }
+
+            let mut content = Vec::with_capacity(uncompressed_size as usize);
+            entry
+                .take((MAX_FILE_BYTES + 1) as u64)
+                .read_to_end(&mut content)?;
+            if content.len() > MAX_FILE_BYTES {
+                return Err(PackError::ResourceLimit);
+            }
+            entries.push((name.to_owned(), content));
+        }
+
+        Self::from_entries(entries)
     }
 
     pub fn from_entries<I>(entries: I) -> Result<Self, PackError>
@@ -228,6 +516,8 @@ impl PackData {
             }
             expected.insert(path.clone());
             check_sql(&self.files, path)?;
+            let schema_sql = sql_file(&self.files, path)?;
+            validate_setup_sql(&schema_sql).map_err(|_| PackError::InvalidSql(path.clone()))?;
         }
 
         let mut problem_paths = BTreeSet::new();
@@ -284,6 +574,103 @@ impl PackImporter {
         self.publish(pack)
     }
 
+    pub fn load_validated(&self, pack_id: &str) -> Result<Option<ValidatedPack>, PackError> {
+        if !is_id(pack_id) {
+            return Err(PackError::InvalidManifest(
+                "invalid requested pack ID".to_owned(),
+            ));
+        }
+        let digest_root = self.registry.join("sha256");
+        if !digest_root.is_dir() {
+            return Ok(None);
+        }
+
+        let mut selected: Option<ValidatedPack> = None;
+        for entry in fs::read_dir(&digest_root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let data = PackData::from_directory(entry.path())?;
+            let pack = data.validate()?;
+            if pack.digest() != entry.file_name().to_string_lossy() {
+                return Err(PackError::InvalidPublishedDestination);
+            }
+            if pack.id() != pack_id {
+                continue;
+            }
+            if let Some(existing) = &selected {
+                match version_cmp(pack.version(), existing.version()) {
+                    std::cmp::Ordering::Greater => selected = Some(pack),
+                    std::cmp::Ordering::Equal if pack.digest() != existing.digest() => {
+                        return Err(PackError::ImmutableVersionConflict {
+                            pack_id: pack.id().to_owned(),
+                            version: pack.version().to_owned(),
+                        });
+                    }
+                    _ => {}
+                }
+            } else {
+                selected = Some(pack);
+            }
+        }
+        Ok(selected)
+    }
+
+    pub fn load_validated_exact(
+        &self,
+        pack_id: &str,
+        version: &str,
+        digest: &str,
+    ) -> Result<Option<ValidatedPack>, PackError> {
+        if !is_id(pack_id) || !is_pack_digest(digest) || version.trim().is_empty() {
+            return Err(PackError::InvalidManifest(
+                "invalid requested pack identity".to_owned(),
+            ));
+        }
+        let destination = self.registry.join("sha256").join(digest);
+        if !destination.is_dir() {
+            return Ok(None);
+        }
+        let pack = PackData::from_directory(destination)?.validate()?;
+        if pack.digest() != digest {
+            return Err(PackError::InvalidPublishedDestination);
+        }
+        if pack.id() != pack_id || pack.version() != version {
+            return Ok(None);
+        }
+        Ok(Some(pack))
+    }
+
+    pub fn list_catalog(&self) -> Result<Vec<PackCatalogEntry>, PackError> {
+        let digest_root = self.registry.join("sha256");
+        if !digest_root.is_dir() {
+            return Ok(Vec::new());
+        }
+        let mut entries = Vec::new();
+        for entry in fs::read_dir(digest_root)? {
+            let entry = entry?;
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let digest = entry.file_name().to_string_lossy().into_owned();
+            if !is_pack_digest(&digest) {
+                return Err(PackError::InvalidPublishedDestination);
+            }
+            let pack = PackData::from_directory(entry.path())?.validate()?;
+            if pack.digest() != digest {
+                return Err(PackError::InvalidPublishedDestination);
+            }
+            entries.push(pack.catalog_entry()?);
+        }
+        entries.sort_by(|left, right| {
+            left.pack_id
+                .cmp(&right.pack_id)
+                .then_with(|| right.version.cmp(&left.version))
+        });
+        Ok(entries)
+    }
+
     pub fn import_into_managed_environment(
         &self,
         pack: &ValidatedPack,
@@ -302,10 +689,25 @@ impl PackImporter {
             .map(|path| sql_file(&pack.files, path))
             .collect::<Result<Vec<_>, _>>()?
             .join("\n");
-        session
+        let published = self.publish(pack)?;
+        if session
             .provision_managed_namespace_with_schema(environment, runner_role, &schema_sql)
-            .map_err(|_| PackError::EnvironmentProvisioning)?;
-        self.publish(pack)
+            .is_err()
+        {
+            if !published.already_installed && fs::remove_dir_all(&published.path).is_err() {
+                return Err(PackError::Publication);
+            }
+            if !published.already_installed
+                && let Some(digest_root) = published.path.parent()
+            {
+                let _ = fs::remove_dir(digest_root);
+                if let Some(registry) = digest_root.parent() {
+                    let _ = fs::remove_dir(registry);
+                }
+            }
+            return Err(PackError::EnvironmentProvisioning);
+        }
+        Ok(published)
     }
 
     fn publish(&self, pack: &ValidatedPack) -> Result<PublishedPack, PackError> {
@@ -496,6 +898,7 @@ fn validate_problem(
         .limits
         .validate()
         .map_err(|error| PackError::InvalidManifest(error.to_string()))?;
+    validate_catalog(problem)?;
 
     let reference_path = root.join(&problem.reference).to_string_lossy().into_owned();
     expected.insert(reference_path.clone());
@@ -532,6 +935,146 @@ fn validate_problem(
     Ok(())
 }
 
+const MAX_CATALOG_TABLES: usize = 64;
+const MAX_CATALOG_COLUMNS: usize = 128;
+const MAX_CATALOG_ROWS: usize = 100;
+const MAX_CATALOG_ROW_COLUMNS: usize = 128;
+const MAX_CATALOG_CELL_BYTES: usize = 4 * 1024;
+const MAX_CATALOG_STARTER_BYTES: usize = 64 * 1024;
+
+fn validate_catalog(problem: &ProblemManifest) -> Result<(), PackError> {
+    let Some(catalog) = &problem.catalog else {
+        return Ok(());
+    };
+    if catalog.schema.len() > MAX_CATALOG_TABLES
+        || catalog.sample_rows.len() > MAX_CATALOG_ROWS
+        || catalog
+            .starter_sql
+            .as_deref()
+            .is_some_and(|sql| sql.is_empty() || sql.len() > MAX_CATALOG_STARTER_BYTES)
+    {
+        return Err(PackError::InvalidManifest(
+            "catalog metadata resource limit exceeded".to_owned(),
+        ));
+    }
+    let mut table_names = BTreeSet::new();
+    for table in &catalog.schema {
+        if !is_catalog_identifier(&table.name)
+            || !table_names.insert(table.name.clone())
+            || table.columns.is_empty()
+            || table.columns.len() > MAX_CATALOG_COLUMNS
+        {
+            return Err(PackError::InvalidManifest(
+                "catalog table metadata is invalid".to_owned(),
+            ));
+        }
+        let mut column_names = BTreeSet::new();
+        for column in &table.columns {
+            if !is_catalog_identifier(&column.name)
+                || !column_names.insert(column.name.clone())
+                || column.r#type.is_empty()
+                || column.r#type.len() > 64
+                || column.r#type.chars().any(char::is_control)
+            {
+                return Err(PackError::InvalidManifest(
+                    "catalog column metadata is invalid".to_owned(),
+                ));
+            }
+        }
+    }
+    for row in &catalog.sample_rows {
+        if row.len() > MAX_CATALOG_ROW_COLUMNS {
+            return Err(PackError::InvalidManifest(
+                "catalog sample row is too wide".to_owned(),
+            ));
+        }
+        for (name, value) in row {
+            if !is_catalog_identifier(name) || !catalog_value_is_bounded(value) {
+                return Err(PackError::InvalidManifest(
+                    "catalog sample row is invalid".to_owned(),
+                ));
+            }
+        }
+    }
+    if catalog
+        .starter_sql
+        .as_deref()
+        .is_some_and(|sql| sql.chars().any(char::is_control))
+    {
+        return Err(PackError::InvalidManifest(
+            "catalog starter SQL is invalid".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn catalog_schema(problem: &ProblemManifest) -> Result<Vec<CatalogTable>, PackError> {
+    validate_catalog(problem)?;
+    Ok(problem
+        .catalog
+        .as_ref()
+        .map(|catalog| {
+            catalog
+                .schema
+                .iter()
+                .map(|table| CatalogTable {
+                    name: table.name.clone(),
+                    columns: table
+                        .columns
+                        .iter()
+                        .map(|column| CatalogColumn {
+                            name: column.name.clone(),
+                            r#type: column.r#type.clone(),
+                            nullable: column.nullable,
+                        })
+                        .collect(),
+                })
+                .collect()
+        })
+        .unwrap_or_default())
+}
+
+fn catalog_sample_rows(
+    problem: &ProblemManifest,
+) -> Result<Vec<BTreeMap<String, serde_json::Value>>, PackError> {
+    validate_catalog(problem)?;
+    Ok(problem
+        .catalog
+        .as_ref()
+        .map(|catalog| catalog.sample_rows.clone())
+        .unwrap_or_default())
+}
+
+fn catalog_starter_sql(problem: &ProblemManifest) -> Result<Option<String>, PackError> {
+    validate_catalog(problem)?;
+    Ok(problem
+        .catalog
+        .as_ref()
+        .and_then(|catalog| catalog.starter_sql.clone()))
+}
+
+fn is_catalog_identifier(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 128
+        && value
+            .chars()
+            .next()
+            .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+}
+
+fn catalog_value_is_bounded(value: &serde_json::Value) -> bool {
+    match value {
+        serde_json::Value::Null | serde_json::Value::Bool(_) | serde_json::Value::Number(_) => true,
+        serde_json::Value::String(value) => {
+            value.len() <= MAX_CATALOG_CELL_BYTES && !value.chars().any(char::is_control)
+        }
+        serde_json::Value::Array(_) | serde_json::Value::Object(_) => false,
+    }
+}
+
 fn validate_column(column: &Column) -> Result<(), PackError> {
     if column.name.is_empty()
         || !column.name.chars().enumerate().all(|(index, character)| {
@@ -551,7 +1094,12 @@ fn collect_directory(
     root: &Path,
     current: &Path,
     files: &mut BTreeMap<String, Vec<u8>>,
+    entry_count: &mut usize,
+    depth: usize,
 ) -> Result<(), PackError> {
+    if depth > MAX_PATH_DEPTH {
+        return Err(PackError::ResourceLimit);
+    }
     for entry in fs::read_dir(current)? {
         let entry = entry?;
         let path = entry.path();
@@ -562,14 +1110,21 @@ fn collect_directory(
             .to_str()
             .ok_or_else(|| PackError::UnsafePath(relative.display().to_string()))?
             .replace(std::path::MAIN_SEPARATOR, "/");
+        validate_path(&name)?;
+        *entry_count += 1;
+        if *entry_count > MAX_ENTRIES || name.split('/').count() > MAX_PATH_DEPTH {
+            return Err(PackError::ResourceLimit);
+        }
         let metadata = fs::symlink_metadata(&path)?;
         if metadata.file_type().is_symlink() {
             return Err(PackError::Symlink(name));
         }
         if metadata.is_dir() {
-            collect_directory(root, &path, files)?;
+            collect_directory(root, &path, files, entry_count, depth + 1)?;
         } else if metadata.is_file() {
-            validate_path(&name)?;
+            if has_multiple_links(&metadata) {
+                return Err(PackError::HardLink(name));
+            }
             if metadata.len() > MAX_FILE_BYTES as u64 {
                 return Err(PackError::ResourceLimit);
             }
@@ -589,6 +1144,22 @@ fn collect_directory(
         return Err(PackError::ResourceLimit);
     }
     Ok(())
+}
+
+fn has_multiple_links(metadata: &fs::Metadata) -> bool {
+    #[cfg(unix)]
+    {
+        metadata.nlink() > 1
+    }
+    #[cfg(windows)]
+    {
+        metadata.number_of_links() > 1
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = metadata;
+        false
+    }
 }
 
 fn json_file<T: DeserializeOwned>(
@@ -620,6 +1191,7 @@ fn check_sql(files: &BTreeMap<String, Vec<u8>>, name: &str) -> Result<(), PackEr
 
 fn validate_path(name: &str) -> Result<(), PackError> {
     if name.is_empty()
+        || name.len() > MAX_RELATIVE_PATH_BYTES
         || name.contains('\\')
         || name.contains('\0')
         || name.starts_with('/')
@@ -628,7 +1200,14 @@ fn validate_path(name: &str) -> Result<(), PackError> {
             .any(|part| part.is_empty() || part == "." || part == "..")
         || (name.as_bytes().get(1) == Some(&b':'))
     {
-        return Err(PackError::UnsafePath(name.to_owned()));
+        return Err(if name.len() > MAX_RELATIVE_PATH_BYTES {
+            PackError::ResourceLimit
+        } else {
+            PackError::UnsafePath(name.to_owned())
+        });
+    }
+    if name.split('/').count() > MAX_PATH_DEPTH {
+        return Err(PackError::ResourceLimit);
     }
     Ok(())
 }
@@ -647,6 +1226,17 @@ fn is_id(value: &str) -> bool {
         && !value.ends_with('-')
 }
 
+fn is_pack_digest(value: &str) -> bool {
+    value.len() == 64 && value.chars().all(|character| character.is_ascii_hexdigit())
+}
+
+fn dialect_name(dialect: Dialect) -> String {
+    match dialect {
+        Dialect::Postgresql => "postgresql".to_owned(),
+        Dialect::Sqlserver => "sqlserver".to_owned(),
+    }
+}
+
 fn is_semver(value: &str) -> bool {
     let parts: Vec<_> = value.split('.').collect();
     parts.len() == 3
@@ -655,6 +1245,16 @@ fn is_semver(value: &str) -> bool {
                 && (part == &"0" || !part.starts_with('0'))
                 && part.chars().all(|c| c.is_ascii_digit())
         })
+}
+
+fn version_cmp(left: &str, right: &str) -> std::cmp::Ordering {
+    left.split('.')
+        .map(|part| part.parse::<u64>().unwrap_or(0))
+        .cmp(
+            right
+                .split('.')
+                .map(|part| part.parse::<u64>().unwrap_or(0)),
+        )
 }
 
 fn is_schema_path(value: &str) -> bool {

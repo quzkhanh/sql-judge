@@ -28,6 +28,7 @@ pub struct TestOutcome {
 pub struct SubmissionReport {
     pub verdict: Verdict,
     pub tests: Vec<TestOutcome>,
+    pub preview: Option<QueryResult>,
 }
 
 struct FixtureExecution {
@@ -122,12 +123,14 @@ fn judge_submission_inner(
     cancellation: Option<&CancellationToken>,
 ) -> SubmissionReport {
     let mut tests = Vec::with_capacity(cases.len());
+    let mut preview = None;
 
     for case in cases {
         if is_cancelled() {
             return SubmissionReport {
                 verdict: cancellation_verdict(cancellation),
                 tests,
+                preview,
             };
         }
         let execution = session.with_managed_fixture(
@@ -153,6 +156,7 @@ fn judge_submission_inner(
             return SubmissionReport {
                 verdict: cancellation_verdict(cancellation),
                 tests,
+                preview,
             };
         }
 
@@ -181,6 +185,9 @@ fn judge_submission_inner(
                 reference: Ok(expected),
                 user: Some(Ok(actual)),
             }) => {
+                if preview.is_none() {
+                    preview = Some(actual.clone());
+                }
                 let comparison = compare_query_results(&expected, &actual, &case.output);
                 TestOutcome {
                     id: case.id.to_owned(),
@@ -208,6 +215,7 @@ fn judge_submission_inner(
     SubmissionReport {
         verdict: aggregate_verdicts(&verdicts),
         tests,
+        preview,
     }
 }
 

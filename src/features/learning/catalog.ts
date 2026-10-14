@@ -1,87 +1,67 @@
-export type ProblemDifficulty = "easy" | "medium" | "hard"
-export type ProblemDialect = "postgresql" | "sqlserver"
+import type {
+  InstalledPack,
+  InstalledProblem,
+  ProblemDifficulty,
+  ProblemDialect,
+} from "@/lib/judge-api"
 
-export type SchemaColumn = {
-  name: string
-  type: string
-  nullable?: boolean
+export type { ProblemDifficulty, ProblemDialect }
+
+export type LearningProblem = InstalledProblem & {
+  problemId: string
+  packId: string
+  packVersion: string
+  packDigest: string
 }
 
-export type LearningProblem = {
-  id: string
-  title: string
-  difficulty: ProblemDifficulty
-  dialect: ProblemDialect
-  topics: string[]
-  statement: string
-  schema: Array<{
-    name: string
-    columns: SchemaColumn[]
-  }>
-  sampleRows: Array<Record<string, string | number | null>>
-  starterSql: string
+export function catalogProblemKey(
+  pack: Pick<InstalledPack, "packId" | "version" | "digest">,
+  problemId: string
+) {
+  return `${pack.packId}@${pack.version}#${pack.digest}:${problemId}`
 }
 
-export const learningProblems: LearningProblem[] = [
-  {
-    id: "above-average",
-    title: "Employees above their department average",
-    difficulty: "medium",
-    dialect: "postgresql",
-    topics: ["correlated-subquery", "aggregation", "window-functions"],
-    statement:
-      "Return one row per employee whose salary is strictly greater than the average of non-NULL salaries in their own department. Do not rely on row ordering.",
-    schema: [
-      {
-        name: "departments",
-        columns: [
-          { name: "id", type: "integer" },
-          { name: "name", type: "text" },
-        ],
-      },
-      {
-        name: "employees",
-        columns: [
-          { name: "id", type: "integer" },
-          { name: "name", type: "text" },
-          { name: "department_id", type: "integer" },
-          { name: "salary", type: "numeric", nullable: true },
-        ],
-      },
-    ],
-    sampleRows: [
-      { employee_id: 1, employee_name: "Alice" },
-      { employee_id: 4, employee_name: "David" },
-    ],
-    starterSql:
-      "SELECT e.id AS employee_id, e.name AS employee_name\nFROM employees AS e\nWHERE e.salary > (\n  SELECT AVG(peer.salary)\n  FROM employees AS peer\n  WHERE peer.department_id = e.department_id\n);",
-  },
-  {
-    id: "first-order",
-    title: "Find each customer's first order",
-    difficulty: "easy",
-    dialect: "postgresql",
-    topics: ["window-functions", "date-filtering"],
-    statement:
-      "Return each customer and the date of their first completed order. Customers without completed orders must be excluded.",
-    schema: [
-      {
-        name: "orders",
-        columns: [
-          { name: "customer_id", type: "integer" },
-          { name: "ordered_at", type: "timestamp" },
-          { name: "status", type: "text" },
-        ],
-      },
-    ],
-    sampleRows: [
-      { customer_id: 11, first_order_at: "2025-01-03 09:00:00" },
-      { customer_id: 14, first_order_at: "2025-02-18 12:30:00" },
-    ],
-    starterSql:
-      "SELECT customer_id, MIN(ordered_at) AS first_order_at\nFROM orders\nWHERE status = 'completed'\nGROUP BY customer_id;",
-  },
-]
+export function catalogProblems(packs: InstalledPack[]): LearningProblem[] {
+  return packs.flatMap((pack) =>
+    pack.problems.map((problem) => {
+      return {
+        ...problem,
+        id: catalogProblemKey(pack, problem.id),
+        problemId: problem.id,
+        packId: pack.packId,
+        packVersion: pack.version,
+        packDigest: pack.digest,
+        schema: problem.schema ?? [],
+        sampleRows: problem.sampleRows ?? [],
+        starterSql: problem.starterSql ?? "",
+      }
+    })
+  )
+}
+
+export function hasInstalledProblems(
+  pack: Pick<InstalledPack, "problems">
+): boolean {
+  return pack.problems.length > 0
+}
+
+export function hasCompleteProblemMetadata(
+  problem: Pick<
+    LearningProblem,
+    "title" | "statement" | "schema" | "sampleRows" | "starterSql"
+  >
+): boolean {
+  return (
+    problem.title.trim().length > 0 &&
+    problem.statement.trim().length > 0 &&
+    problem.schema.length > 0 &&
+    problem.schema.every(
+      (table) => table.name.trim().length > 0 && table.columns.length > 0
+    ) &&
+    hasSampleData(problem) &&
+    Boolean(problem.starterSql?.trim())
+  )
+}
 
 export function filterProblems(
   problems: LearningProblem[],
@@ -104,4 +84,13 @@ export function filterProblems(
 
     return matchesQuery && matchesDialect && matchesDifficulty
   })
+}
+
+export function hasSampleData(problem: Pick<LearningProblem, "sampleRows">) {
+  return sampleColumns(problem).length > 0
+}
+
+export function sampleColumns(problem: Pick<LearningProblem, "sampleRows">) {
+  const firstRow = problem.sampleRows.at(0)
+  return firstRow ? Object.keys(firstRow) : []
 }

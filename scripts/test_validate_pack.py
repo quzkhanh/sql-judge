@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
+import stat
 import tempfile
 import unittest
 from pathlib import Path
@@ -55,6 +57,25 @@ class PackValidatorTests(unittest.TestCase):
         load_folder(self.folder, problems)
         self.assertTrue(any("Symlink forbidden" in s for s in problems))
 
+    def test_hardlink_in_folder_rejected(self):
+        source = self.folder / "README.md"
+        linked = self.folder / "README-copy.md"
+        os.link(source, linked)
+        problems: list[str] = []
+        load_folder(self.folder, problems)
+        self.assertTrue(any("Hard link forbidden" in s for s in problems))
+
+    def test_zip_link_like_entry_rejected(self):
+        zip_path = Path(self.tmp.name) / "link-like.sqljudge.zip"
+        info = ZipInfo("link.sql")
+        info.create_system = 3
+        info.external_attr = (stat.S_IFLNK | 0o777) << 16
+        with ZipFile(zip_path, "w") as archive:
+            archive.writestr(info, "target.sql")
+        problems: list[str] = []
+        load_zip(zip_path, problems)
+        self.assertTrue(any("symlink/special" in s for s in problems))
+
     def test_zip_path_traversal_rejected(self):
         zip_path = Path(self.tmp.name) / "attack.sqljudge.zip"
         with ZipFile(zip_path, "w") as archive:
@@ -71,6 +92,19 @@ class PackValidatorTests(unittest.TestCase):
         problems: list[str] = []
         load_zip(zip_path, problems)
         self.assertTrue(any("Duplicate/case-colliding" in s for s in problems))
+
+    def test_zip_cumulative_compressed_size_rejected(self):
+        zip_path = Path(self.tmp.name) / "compressed-size.sqljudge.zip"
+        content = bytes(range(251)) * (900_000 // 251 + 1)
+        with ZipFile(zip_path, "w") as archive:
+            for index in range(10):
+                info = ZipInfo(f"files/{index}.sql")
+                info.compress_type = 0
+                archive.writestr(info, content[:900_000])
+
+        problems: list[str] = []
+        load_zip(zip_path, problems)
+        self.assertTrue(any("Compressed ZIP exceeds limit" in s for s in problems))
 
     def test_extra_file_rejected(self):
         (self.folder / "run.sh").write_text("echo hello")

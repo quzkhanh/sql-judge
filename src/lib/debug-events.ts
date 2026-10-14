@@ -60,7 +60,9 @@ export function serializeError(error: unknown): SerializedError {
   return {
     name: "Error",
     message: redactDebugText(
-      typeof error === "string" ? error : (JSON.stringify(error) ?? String(error))
+      typeof error === "string"
+        ? error
+        : (JSON.stringify(error) ?? String(error))
     ),
   }
 }
@@ -104,7 +106,17 @@ const REDACTED_DEBUG_KEYS = new Set([
   "secret",
   "sql",
   "token",
+  "url",
 ])
+
+const CONNECTION_DEBUG_KEYS = new Set(["connectionstring", "connectionurl"])
+
+const CONNECTION_URI_PATTERN =
+  /\b(?:jdbc:(?:postgresql|sqlserver):\/\/|postgres(?:ql)?:\/\/|sqlserver:\/\/)[^\s"'`]+/gi
+
+function normalizedDebugKey(key: string) {
+  return key.replace(/[-_]/g, "").toLowerCase()
+}
 
 function sanitizeDebugValue(value: unknown): unknown {
   if (Array.isArray(value)) {
@@ -112,18 +124,28 @@ function sanitizeDebugValue(value: unknown): unknown {
   }
   if (value && typeof value === "object") {
     return Object.fromEntries(
-      Object.entries(value).map(([key, item]) => [
-        key,
-        REDACTED_DEBUG_KEYS.has(key)
-          ? Array.isArray(item)
-            ? `[redacted ${key}: ${item.length}]`
-            : "[redacted]"
-          : sanitizeDebugValue(item),
-      ])
+      Object.entries(value).map(([key, item]) => {
+        const normalizedKey = normalizedDebugKey(key)
+        if (CONNECTION_DEBUG_KEYS.has(normalizedKey)) {
+          return [key, `[redacted ${key}]`]
+        }
+        if (
+          REDACTED_DEBUG_KEYS.has(key) ||
+          REDACTED_DEBUG_KEYS.has(normalizedKey)
+        ) {
+          return [
+            key,
+            Array.isArray(item)
+              ? `[redacted ${key}: ${item.length}]`
+              : "[redacted]",
+          ]
+        }
+        return [key, sanitizeDebugValue(item)]
+      })
     )
   }
   if (typeof value === "string") {
-    return value.length > 500 ? `${value.slice(0, 500)}…` : value
+    return redactDebugText(value)
   }
   return value ?? null
 }
@@ -141,8 +163,11 @@ export function redactUrl(value: string): string {
 }
 
 export function redactDebugText(value: string): string {
+  value = value.replace(CONNECTION_URI_PATTERN, "[redacted connection URI]")
   if (
-    /(?:password|secret|token|connection[_-]?string)\s*[:=]/i.test(value)
+    /["']?(?:password|pwd|secret|token|connection[_-]?string|sql|query|rows|href|search|hash)["']?\s*[:=]/i.test(
+      value
+    )
   ) {
     return "[redacted sensitive text]"
   }
@@ -162,6 +187,15 @@ export function emitDebugEvent(detail: DebugEvent) {
   }
 
   window.dispatchEvent(
-    new CustomEvent<DebugEvent>(DEBUG_EVENT_NAME, { detail })
+    new CustomEvent<DebugEvent>(DEBUG_EVENT_NAME, {
+      detail: sanitizeDebugValue(detail) as DebugEvent,
+    })
   )
+}
+
+export function forwardConsoleArguments(
+  originalMethod: (...data: unknown[]) => void,
+  args: unknown[]
+) {
+  originalMethod(...args.map((argument) => serializeDebugValue(argument)))
 }

@@ -1,9 +1,12 @@
 use fallible_iterator::FallibleIterator;
 use judge_core::{Column, LogicalType, QueryLimits, QueryResult, SqlValue};
 use postgres::{
-    Client, NoTls, Row,
+    Client, Config, NoTls, Row,
     types::{ToSql, Type},
 };
+use postgres_native_tls::MakeTlsConnector;
+use std::collections::BTreeMap;
+use std::error::Error as StdError;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread::{self, JoinHandle};
@@ -42,6 +45,504 @@ pub enum QueryExecutionError {
     ConnectionError,
     #[error("managed namespace ownership marker does not match")]
     OwnershipVerificationFailed,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ExternalTlsMode {
+    VerifyFull,
+    VerifyCa,
+    Require,
+    Disable,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct ExternalPostgresConfig {
+    pub host: String,
+    pub port: u16,
+    pub database: String,
+    pub username: String,
+    pub password: String,
+    pub tls_mode: ExternalTlsMode,
+    pub allow_insecure_local: bool,
+}
+
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum ExternalPostgresError {
+    #[error("external connection profile is invalid: {0}")]
+    InvalidProfile(&'static str),
+    #[error("external TLS policy rejected")]
+    TlsPolicyRejected,
+    #[error("external TLS negotiation failed")]
+    TlsFailed,
+    #[error("external authentication failed")]
+    AuthenticationFailed,
+    #[error("external PostgreSQL server is unreachable")]
+    ServerUnreachable,
+    #[error("external query limits are invalid: {0}")]
+    InvalidLimits(String),
+    #[error("external SELECT query was rejected")]
+    QueryRejected,
+    #[error("external query timed out")]
+    QueryTimeout,
+    #[error("external query exceeded its result limit")]
+    ResultLimitExceeded,
+    #[error("external PostgreSQL operation failed")]
+    DatabaseError,
+    #[error("external PostgreSQL returned an unsupported type: {0}")]
+    UnsupportedType(String),
+}
+
+pub struct ExternalPostgresExplorer {
+    client: Client,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalConnectionInfo {
+    pub database: String,
+    pub username: String,
+    pub server_version: String,
+    pub read_only: bool,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct WriteCapabilitySnapshot {
+    role: bool,
+    database: bool,
+    schema: bool,
+    table: bool,
+    sequence: bool,
+    default_acl: bool,
+}
+
+impl WriteCapabilitySnapshot {
+    fn read_only(self) -> bool {
+        !self.role
+            && !self.database
+            && !self.schema
+            && !self.table
+            && !self.sequence
+            && !self.default_acl
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalColumn {
+    pub name: String,
+    pub data_type: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalTable {
+    pub schema: String,
+    pub name: String,
+    pub kind: String,
+    pub columns: Vec<ExternalColumn>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalMetadata {
+    pub tables: Vec<ExternalTable>,
+    pub truncated: bool,
+}
+
+impl ExternalPostgresExplorer {
+    pub fn connect(config: ExternalPostgresConfig) -> Result<Self, ExternalPostgresError> {
+        validate_external_config(&config)?;
+        let mut connection = Config::new();
+        connection
+            .host(&config.host)
+            .port(config.port)
+            .dbname(&config.database)
+            .user(&config.username)
+            .password(&config.password);
+
+        let client = match config.tls_mode {
+            ExternalTlsMode::Disable => connection
+                .connect(NoTls)
+                .map_err(map_external_connection_error)?,
+            ExternalTlsMode::VerifyFull | ExternalTlsMode::Require => {
+                let connector = native_tls::TlsConnector::builder()
+                    .build()
+                    .map_err(|_| ExternalPostgresError::TlsFailed)?;
+                connection
+                    .connect(MakeTlsConnector::new(connector))
+                    .map_err(map_external_connection_error)?
+            }
+            ExternalTlsMode::VerifyCa => {
+                let connector = native_tls::TlsConnector::builder()
+                    .danger_accept_invalid_hostnames(true)
+                    .build()
+                    .map_err(|_| ExternalPostgresError::TlsFailed)?;
+                connection
+                    .connect(MakeTlsConnector::new(connector))
+                    .map_err(map_external_connection_error)?
+            }
+        };
+        Ok(Self { client })
+    }
+
+    pub fn test_connection(&mut self) -> Result<ExternalConnectionInfo, ExternalPostgresError> {
+        self.client
+            .batch_execute("BEGIN READ ONLY; SET LOCAL statement_timeout = 2000")
+            .map_err(map_external_connection_error)?;
+        let result = (|| {
+            let row = self
+                .client
+                .query_one(
+                    "SELECT current_database(), current_user, current_setting('server_version'),
+                            COALESCE((
+                                SELECT r.rolsuper OR r.rolcreaterole OR r.rolcreatedb
+                                       OR r.rolbypassrls
+                                       OR EXISTS (
+                                           SELECT 1
+                                           FROM pg_catalog.pg_roles write_role
+                                           WHERE write_role.rolname = 'pg_write_all_data'
+                                             AND pg_catalog.pg_has_role(current_user, write_role.oid, 'member')
+                                       )
+                                FROM pg_catalog.pg_roles r
+                                WHERE r.rolname = current_user
+                            ), true) AS role_write,
+                            (
+                                has_database_privilege(current_user, current_database(), 'CREATE')
+                                OR has_database_privilege(current_user, current_database(), 'TEMPORARY')
+                            ) AS database_write,
+                            EXISTS (
+                                SELECT 1
+                                FROM pg_catalog.pg_namespace n
+                                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                                  AND n.nspname NOT LIKE 'pg_toast%'
+                                  AND has_schema_privilege(current_user, n.oid, 'CREATE')
+                            ) AS schema_write,
+                            EXISTS (
+                                SELECT 1
+                                FROM pg_catalog.pg_class c
+                                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                                  AND n.nspname NOT LIKE 'pg_toast%'
+                                  AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+                                  AND (
+                                      has_table_privilege(current_user, c.oid, 'INSERT')
+                                      OR has_table_privilege(current_user, c.oid, 'UPDATE')
+                                      OR has_table_privilege(current_user, c.oid, 'DELETE')
+                                      OR has_table_privilege(current_user, c.oid, 'TRUNCATE')
+                                  )
+                            ) AS table_write,
+                            EXISTS (
+                                SELECT 1
+                                FROM pg_catalog.pg_class c
+                                JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                                WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                                  AND n.nspname NOT LIKE 'pg_toast%'
+                                  AND c.relkind = 'S'
+                                  AND (
+                                      has_sequence_privilege(current_user, c.oid, 'USAGE')
+                                      OR has_sequence_privilege(current_user, c.oid, 'UPDATE')
+                                  )
+                            ) AS sequence_write,
+                            EXISTS (
+                                SELECT 1
+                                FROM pg_catalog.pg_default_acl d
+                                CROSS JOIN LATERAL pg_catalog.aclexplode(d.defaclacl) privilege
+                                WHERE (
+                                    (d.defaclobjtype = 'r' AND privilege.privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE'))
+                                    OR (d.defaclobjtype = 'S' AND privilege.privilege_type IN ('USAGE', 'UPDATE'))
+                                    OR (d.defaclobjtype = 'n' AND privilege.privilege_type = 'CREATE')
+                                )
+                                AND (
+                                    privilege.grantee = 0
+                                    OR privilege.grantee = (SELECT oid FROM pg_catalog.pg_roles WHERE rolname = current_user)
+                                    OR pg_catalog.pg_has_role(current_user, privilege.grantee, 'member')
+                                )
+                            ) AS default_acl_write",
+                    &[],
+                )
+                .map_err(map_external_connection_error)?;
+            let capabilities = WriteCapabilitySnapshot {
+                role: row.get(3),
+                database: row.get(4),
+                schema: row.get(5),
+                table: row.get(6),
+                sequence: row.get(7),
+                default_acl: row.get(8),
+            };
+            Ok(ExternalConnectionInfo {
+                database: row.get(0),
+                username: row.get(1),
+                server_version: row.get(2),
+                read_only: capabilities.read_only(),
+            })
+        })();
+        let rollback = self.client.batch_execute("ROLLBACK");
+        if rollback.is_err() {
+            return Err(ExternalPostgresError::DatabaseError);
+        }
+        result
+    }
+
+    pub fn list_metadata(
+        &mut self,
+        limits: QueryLimits,
+    ) -> Result<ExternalMetadata, ExternalPostgresError> {
+        validate_external_limits(&limits)?;
+        self.begin_read_only(&limits)?;
+        let result = (|| {
+            let requested = i64::from(limits.max_rows).saturating_add(1);
+            let rows = self
+                .client
+                .query(
+                    "SELECT n.nspname, c.relname, c.relkind::text, a.attname,
+                            format_type(a.atttypid, a.atttypmod)
+                     FROM pg_catalog.pg_class c
+                     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                     JOIN pg_catalog.pg_attribute a ON a.attrelid = c.oid
+                     WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+                       AND n.nspname NOT LIKE 'pg_toast%'
+                       AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+                       AND a.attnum > 0 AND NOT a.attisdropped
+                     ORDER BY n.nspname, c.relname, a.attnum
+                     LIMIT $1",
+                    &[&requested],
+                )
+                .map_err(map_external_query_error)?;
+            let truncated = rows.len() > limits.max_rows as usize;
+            let mut tables = BTreeMap::<(String, String), ExternalTable>::new();
+            let mut bytes = 0_u32;
+            for row in rows.into_iter().take(limits.max_rows as usize) {
+                let schema: String = row.get(0);
+                let name: String = row.get(1);
+                let kind: String = row.get(2);
+                let column_name: String = row.get(3);
+                let data_type: String = row.get(4);
+                bytes = bytes
+                    .checked_add(
+                        u32::try_from(
+                            schema.len()
+                                + name.len()
+                                + kind.len()
+                                + column_name.len()
+                                + data_type.len(),
+                        )
+                        .map_err(|_| ExternalPostgresError::ResultLimitExceeded)?,
+                    )
+                    .ok_or(ExternalPostgresError::ResultLimitExceeded)?;
+                if bytes > limits.max_bytes {
+                    return Err(ExternalPostgresError::ResultLimitExceeded);
+                }
+                tables
+                    .entry((schema.clone(), name.clone()))
+                    .or_insert_with(|| ExternalTable {
+                        schema,
+                        name,
+                        kind,
+                        columns: Vec::new(),
+                    })
+                    .columns
+                    .push(ExternalColumn {
+                        name: column_name,
+                        data_type,
+                    });
+            }
+            Ok(ExternalMetadata {
+                tables: tables.into_values().collect(),
+                truncated,
+            })
+        })();
+        self.finish_read_only(result)
+    }
+
+    pub fn execute_select(
+        &mut self,
+        sql: &str,
+        limits: QueryLimits,
+    ) -> Result<QueryResult, ExternalPostgresError> {
+        validate_external_select(sql)?;
+        validate_external_limits(&limits)?;
+        self.begin_read_only(&limits)?;
+        let result = (|| {
+            let statement = self.client.prepare(sql).map_err(map_external_query_error)?;
+            let columns = statement
+                .columns()
+                .iter()
+                .map(|column| {
+                    logical_type(column.type_())
+                        .map(|logical_type| Column::new(column.name(), logical_type))
+                        .map_err(|error| match error {
+                            QueryExecutionError::UnsupportedType(kind) => {
+                                ExternalPostgresError::UnsupportedType(kind)
+                            }
+                            _ => ExternalPostgresError::DatabaseError,
+                        })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut rows = self
+                .client
+                .query_raw(&statement, std::iter::empty::<&(dyn ToSql + Sync)>())
+                .map_err(map_external_query_error)?;
+            let mut values = Vec::with_capacity(limits.max_rows as usize);
+            let mut result_bytes = 0_u32;
+            let mut row_count = 0_usize;
+            while let Some(row) = rows.next().map_err(map_external_query_error)? {
+                if row_count >= limits.max_rows as usize {
+                    return Err(ExternalPostgresError::ResultLimitExceeded);
+                }
+                let row_values = decode_row(&row).map_err(map_external_decode_error)?;
+                result_bytes = result_bytes
+                    .checked_add(
+                        u32::try_from(
+                            serde_json::to_vec(&row_values)
+                                .map_err(|_| ExternalPostgresError::DatabaseError)?
+                                .len(),
+                        )
+                        .map_err(|_| ExternalPostgresError::ResultLimitExceeded)?,
+                    )
+                    .ok_or(ExternalPostgresError::ResultLimitExceeded)?;
+                if result_bytes > limits.max_bytes {
+                    return Err(ExternalPostgresError::ResultLimitExceeded);
+                }
+                values.push(row_values);
+                row_count += 1;
+            }
+            QueryResult::new(columns, values).map_err(|_| ExternalPostgresError::DatabaseError)
+        })();
+        self.finish_read_only(result)
+    }
+
+    fn begin_read_only(&mut self, limits: &QueryLimits) -> Result<(), ExternalPostgresError> {
+        self.client
+            .batch_execute(&format!(
+                "BEGIN READ ONLY; SET LOCAL statement_timeout = {}; SET LOCAL idle_in_transaction_session_timeout = {}",
+                limits.statement_timeout_ms, limits.statement_timeout_ms
+            ))
+            .map_err(map_external_query_error)
+    }
+
+    fn finish_read_only<T>(
+        &mut self,
+        result: Result<T, ExternalPostgresError>,
+    ) -> Result<T, ExternalPostgresError> {
+        if self.client.batch_execute("ROLLBACK").is_err() {
+            return Err(ExternalPostgresError::DatabaseError);
+        }
+        result
+    }
+}
+
+fn validate_external_limits(limits: &QueryLimits) -> Result<(), ExternalPostgresError> {
+    limits
+        .validate()
+        .map_err(|error| ExternalPostgresError::InvalidLimits(error.to_string()))
+}
+
+fn map_external_query_error(error: postgres::Error) -> ExternalPostgresError {
+    if let Some(database_error) = error.as_db_error() {
+        return match database_error.code().code() {
+            "57014" => ExternalPostgresError::QueryTimeout,
+            "42601" | "42602" | "42603" | "42604" | "42609" | "42610" => {
+                ExternalPostgresError::QueryRejected
+            }
+            _ => ExternalPostgresError::DatabaseError,
+        };
+    }
+    ExternalPostgresError::ServerUnreachable
+}
+
+fn map_external_decode_error(error: QueryExecutionError) -> ExternalPostgresError {
+    match error {
+        QueryExecutionError::UnsupportedType(kind) => ExternalPostgresError::UnsupportedType(kind),
+        _ => ExternalPostgresError::DatabaseError,
+    }
+}
+
+fn validate_external_config(config: &ExternalPostgresConfig) -> Result<(), ExternalPostgresError> {
+    for (value, field) in [
+        (&config.host, "host"),
+        (&config.database, "database"),
+        (&config.username, "username"),
+    ] {
+        if value.trim().is_empty() || value.len() > 256 || value.chars().any(char::is_control) {
+            return Err(ExternalPostgresError::InvalidProfile(field));
+        }
+    }
+    if config.host.chars().any(char::is_whitespace)
+        || config.host.contains('/')
+        || config.host.contains('\\')
+    {
+        return Err(ExternalPostgresError::InvalidProfile("host"));
+    }
+    if config.port == 0 {
+        return Err(ExternalPostgresError::InvalidProfile("port"));
+    }
+    if matches!(config.tls_mode, ExternalTlsMode::Disable)
+        && (!config.allow_insecure_local || !is_loopback_host(&config.host))
+    {
+        return Err(ExternalPostgresError::TlsPolicyRejected);
+    }
+    Ok(())
+}
+
+fn is_loopback_host(host: &str) -> bool {
+    matches!(host, "127.0.0.1" | "localhost" | "::1" | "[::1]")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::WriteCapabilitySnapshot;
+
+    #[test]
+    fn read_only_requires_all_write_capabilities_to_be_false() {
+        let baseline = WriteCapabilitySnapshot::default();
+        assert!(baseline.read_only());
+
+        for snapshot in [
+            WriteCapabilitySnapshot {
+                role: true,
+                ..baseline
+            },
+            WriteCapabilitySnapshot {
+                database: true,
+                ..baseline
+            },
+            WriteCapabilitySnapshot {
+                schema: true,
+                ..baseline
+            },
+            WriteCapabilitySnapshot {
+                table: true,
+                ..baseline
+            },
+            WriteCapabilitySnapshot {
+                sequence: true,
+                ..baseline
+            },
+            WriteCapabilitySnapshot {
+                default_acl: true,
+                ..baseline
+            },
+        ] {
+            assert!(!snapshot.read_only());
+        }
+    }
+}
+
+fn map_external_connection_error(error: postgres::Error) -> ExternalPostgresError {
+    if let Some(database_error) = error.as_db_error() {
+        return match database_error.code().code() {
+            "28P01" | "28000" => ExternalPostgresError::AuthenticationFailed,
+            _ => ExternalPostgresError::DatabaseError,
+        };
+    }
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if cause.downcast_ref::<native_tls::Error>().is_some() {
+            return ExternalPostgresError::TlsFailed;
+        }
+        source = cause.source();
+    }
+    ExternalPostgresError::ServerUnreachable
+}
+
+pub fn validate_external_select(sql: &str) -> Result<(), ExternalPostgresError> {
+    validate_read_only_sql(sql).map_err(|_| ExternalPostgresError::QueryRejected)
 }
 
 #[derive(Clone, Default)]
@@ -103,11 +604,10 @@ struct CancellationWatcher {
 }
 
 impl CancellationWatcher {
-    fn start(token: &CancellationToken, client: &Client) -> Self {
+    fn start(token: &CancellationToken, cancel_token: postgres::CancelToken) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let watcher_stop = Arc::clone(&stop);
         let cancellation = token.clone();
-        let cancel_token = client.cancel_token();
         let handle = thread::spawn(move || {
             while !watcher_stop.load(Ordering::Acquire) {
                 if cancellation.is_cancelled() {
@@ -318,7 +818,16 @@ impl PostgresSession {
                     .map(|logical_type| Column::new(column.name(), logical_type))
             })
             .collect::<Result<Vec<_>, _>>()?;
-        let _watcher = cancellation.map(|token| CancellationWatcher::start(token, &self.client));
+        let cancel_token = cancellation.map(|_| self.client.cancel_token());
+        if cancellation.is_some_and(CancellationToken::is_cancelled) {
+            return Err(QueryExecutionError::Cancelled);
+        }
+        let _watcher = match (cancellation, cancel_token) {
+            (Some(token), Some(cancel_token)) => {
+                Some(CancellationWatcher::start(token, cancel_token))
+            }
+            _ => None,
+        };
         let mut rows = self
             .client
             .query_raw(&statement, std::iter::empty::<&(dyn ToSql + Sync)>())
@@ -365,8 +874,6 @@ impl PostgresSession {
         if !is_safe_role_name(runner_role) {
             return Err(QueryExecutionError::PolicyViolation);
         }
-        validate_setup_sql(schema_sql)?;
-        validate_setup_sql(fixture_sql)?;
         let runner_is_constrained = self
             .client
             .query_opt(
@@ -383,6 +890,8 @@ impl PostgresSession {
 
         let fixture_suffix = unique_fixture_suffix();
         let fixture_schema = format!("sj_fixture_{fixture_suffix}");
+        validate_setup_sql_for_namespace(schema_sql, Some(&fixture_schema))?;
+        validate_setup_sql_for_namespace(fixture_sql, Some(&fixture_schema))?;
         let fixture_role = format!("sj_fixture_{fixture_suffix}");
         let schema = quote_identifier(&fixture_schema);
         let role = quote_identifier(&fixture_role);
@@ -566,25 +1075,74 @@ impl PostgresSession {
         runner_role: &str,
         schema_sql: &str,
     ) -> Result<(), QueryExecutionError> {
-        validate_setup_sql(schema_sql)?;
+        validate_setup_sql_for_namespace(schema_sql, Some(&environment.namespace))?;
+        let namespace_existed = self.managed_namespace_exists(environment)?;
         self.provision_managed_namespace(environment, runner_role)?;
 
         let schema = quote_identifier(&environment.namespace);
+        let marker = format!("{schema}.\"__sql_judge_ownership\"");
+        let role = quote_identifier(runner_role);
         self.client
             .batch_execute("BEGIN")
             .map_err(|_| QueryExecutionError::RuntimeError)?;
-        let setup = self
-            .client
-            .batch_execute(&format!(
-                "SET LOCAL search_path TO {schema}, pg_catalog;\n{schema_sql}"
-            ))
-            .map_err(|_| QueryExecutionError::RuntimeError);
-        let rollback = self.client.batch_execute("COMMIT");
-        if rollback.is_err() {
-            Err(QueryExecutionError::RuntimeError)
+        let setup = (|| {
+            self.client
+                .batch_execute(&format!(
+                    "GRANT USAGE, CREATE ON SCHEMA {schema} TO {role};
+                     SET LOCAL search_path TO {schema}, pg_catalog;
+                     SET LOCAL ROLE {role};
+                     {schema_sql}"
+                ))
+                .map_err(|_| QueryExecutionError::RuntimeError)?;
+            self.client
+                .batch_execute(&format!(
+                    "RESET ROLE;
+                     REVOKE CREATE ON SCHEMA {schema} FROM {role};
+                     GRANT USAGE ON SCHEMA {schema} TO {role};
+                     GRANT SELECT ON ALL TABLES IN SCHEMA {schema} TO {role};
+                     REVOKE ALL ON TABLE {marker} FROM {role}, PUBLIC"
+                ))
+                .map_err(|_| QueryExecutionError::RuntimeError)
+        })();
+        let transaction = if setup.is_ok() {
+            self.client.batch_execute("COMMIT")
         } else {
-            setup
+            self.client.batch_execute("ROLLBACK")
+        };
+        match (setup, transaction.is_ok()) {
+            (Ok(()), true) => Ok(()),
+            (setup, _) => {
+                let setup_error = setup.err().unwrap_or(QueryExecutionError::RuntimeError);
+                let revoke = self
+                    .client
+                    .batch_execute(&format!("REVOKE CREATE ON SCHEMA {schema} FROM {role}"));
+                if revoke.is_err() {
+                    return Err(QueryExecutionError::RuntimeError);
+                }
+                if namespace_existed {
+                    return Err(setup_error);
+                }
+                match self.drop_managed_namespace(environment) {
+                    Ok(()) => Err(setup_error),
+                    Err(_) => Err(QueryExecutionError::RuntimeError),
+                }
+            }
         }
+    }
+
+    pub fn managed_namespace_exists(
+        &mut self,
+        environment: &ManagedEnvironment,
+    ) -> Result<bool, QueryExecutionError> {
+        self.client
+            .query_one(
+                "SELECT EXISTS (
+                     SELECT 1 FROM pg_catalog.pg_namespace WHERE nspname = $1
+                 )",
+                &[&environment.namespace],
+            )
+            .map(|row| row.get::<_, bool>(0))
+            .map_err(map_database_error)
     }
 
     pub fn managed_namespace_is_owned(
@@ -633,6 +1191,29 @@ impl PostgresSession {
             return Err(QueryExecutionError::OwnershipVerificationFailed);
         }
         Ok(true)
+    }
+
+    pub fn managed_namespace_has_schema(
+        &mut self,
+        environment: &ManagedEnvironment,
+    ) -> Result<bool, QueryExecutionError> {
+        if !self.managed_namespace_is_owned(environment)? {
+            return Ok(false);
+        }
+        self.client
+            .query_one(
+                "SELECT EXISTS (
+                     SELECT 1
+                     FROM pg_catalog.pg_class c
+                     JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+                     WHERE n.nspname = $1
+                       AND c.relname <> $2
+                       AND c.relkind IN ('r', 'p', 'v', 'm')
+                 )",
+                &[&environment.namespace, &"__sql_judge_ownership"],
+            )
+            .map(|row| row.get::<_, bool>(0))
+            .map_err(map_database_error)
     }
 
     pub fn drop_managed_namespace(
@@ -801,6 +1382,14 @@ pub fn validate_read_only_sql(sql: &str) -> Result<(), QueryExecutionError> {
 }
 
 pub fn validate_setup_sql(sql: &str) -> Result<(), QueryExecutionError> {
+    validate_setup_sql_for_namespace(sql, None)
+}
+
+pub fn validate_setup_sql_for_namespace(
+    sql: &str,
+    namespace: Option<&str>,
+) -> Result<(), QueryExecutionError> {
+    let namespace = namespace.map(str::to_ascii_lowercase);
     const FORBIDDEN: &[&str] = &[
         "alter",
         "analyze",
@@ -840,8 +1429,11 @@ pub fn validate_setup_sql(sql: &str) -> Result<(), QueryExecutionError> {
             .collect();
         if tokens.is_empty()
             || tokens.iter().any(|token| {
-                FORBIDDEN.contains(token) || token.starts_with("pg_") || token.starts_with("lo_")
+                FORBIDDEN.contains(token)
+                    || (token.starts_with("pg_") && !is_allowed_pg_catalog_token(&statement, token))
+                    || token.starts_with("lo_")
             })
+            || has_unsafe_qualified_identifier(&statement, namespace.as_deref())
             || !matches!(
                 tokens.as_slice(),
                 ["create", "table", ..] | ["create", "index", ..] | ["insert", "into", ..]
@@ -851,6 +1443,33 @@ pub fn validate_setup_sql(sql: &str) -> Result<(), QueryExecutionError> {
         }
     }
     Ok(())
+}
+
+fn has_unsafe_qualified_identifier(statement: &str, namespace: Option<&str>) -> bool {
+    statement
+        .split(|character: char| {
+            !(character.is_ascii_alphanumeric() || character == '_' || character == '.')
+        })
+        .filter(|token| token.contains('.'))
+        .any(|token| {
+            let parts: Vec<_> = token.split('.').collect();
+            if parts.iter().any(|part| part.is_empty()) || parts.len() < 2 {
+                return true;
+            }
+            if parts
+                .iter()
+                .all(|part| part.chars().all(|character| character.is_ascii_digit()))
+            {
+                return false;
+            }
+            parts.len() != 2
+                || !matches!(parts[0], "pg_catalog")
+                    && namespace.is_none_or(|allowed| parts[0] != allowed)
+        })
+}
+
+fn is_allowed_pg_catalog_token(statement: &str, token: &str) -> bool {
+    token == "pg_catalog" || statement.contains(&format!("pg_catalog.{token}"))
 }
 
 fn split_setup_statements(sql: &str) -> Result<Vec<String>, QueryExecutionError> {

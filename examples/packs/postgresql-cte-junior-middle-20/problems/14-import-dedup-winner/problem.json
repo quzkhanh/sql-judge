@@ -1,0 +1,50 @@
+{
+  "id": "14-import-dedup-winner",
+  "title": "CTE 14 — Deterministic Import Deduplication",
+  "difficulty": "medium",
+  "topics": ["cte", "deduplication", "row-number", "null"],
+  "statement": "Từ import_staging, chọn DUY NHẤT một bản ghi thắng cho mỗi (import_id, external_key) với external_key KHÁC NULL. Chọn source_row_number NHỎ NHẤT; nếu trùng chọn staging id NHỎ NHẤT. Cùng external_key ở import KHÁC NHAU là 2 nhóm độc lập. Mỗi dòng = một business key trong một import. Trả về import_id, external_key, staging_id. Bắt buộc luyện bằng WITH ... AS (recursive ở bài yêu cầu đệ quy); judge chấm theo output.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "import_id",
+        "type": "integer"
+      },
+      {
+        "name": "external_key",
+        "type": "text"
+      },
+      {
+        "name": "staging_id",
+        "type": "integer"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 5000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "edge",
+      "file": "tests/edge.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty",
+      "file": "tests/empty.sql",
+      "hidden": true
+    }
+  ]
+}

@@ -8,6 +8,8 @@ fn managed() -> EnvironmentRecord {
         env_id: "env-1".to_owned(),
         instance_id: "instance-1".to_owned(),
         pack_id: "hr-sql-101".to_owned(),
+        pack_version: "1.0.0".to_owned(),
+        pack_digest: "a".repeat(64),
         namespace: "sj_env_1".to_owned(),
         ownership_nonce: "nonce-1".to_owned(),
         mode: EnvironmentMode::Managed,

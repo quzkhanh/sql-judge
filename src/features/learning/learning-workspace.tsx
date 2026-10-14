@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import Editor from "@monaco-editor/react"
 import {
   CheckCircle2,
   Database,
   Filter,
   Play,
+  RefreshCw,
   Send,
   Table2,
   XCircle,
@@ -23,16 +25,28 @@ import { Label } from "@/components/ui/label"
 import { cn } from "@/lib/utils"
 import {
   cancelJudge,
+  listInstalledPacks,
   runJudge,
   type JudgeRunResult,
+  type InstalledPack,
 } from "@/lib/judge-api"
 import {
+  catalogProblems,
+  catalogProblemKey,
   filterProblems,
-  learningProblems,
+  hasCompleteProblemMetadata,
+  hasSampleData,
+  sampleColumns,
   type LearningProblem,
   type ProblemDifficulty,
   type ProblemDialect,
 } from "./catalog"
+import {
+  beginJudgeRequest,
+  isCurrentJudgeRequest,
+  type JudgeRequest,
+} from "./judge-state"
+import { learningLoadErrorMessage } from "./load-state"
 
 const difficultyLabels: Record<ProblemDifficulty, string> = {
   easy: "Easy",
@@ -40,55 +54,212 @@ const difficultyLabels: Record<ProblemDifficulty, string> = {
   hard: "Hard",
 }
 
+const MAX_SQL_LENGTH = 65_536
+const MAX_RENDERED_ROWS = 100
+const MAX_RENDERED_CELL_LENGTH = 512
+
 export function LearningWorkspace() {
+  const [packs, setPacks] = useState<InstalledPack[]>([])
   const [query, setQuery] = useState("")
   const [dialect, setDialect] = useState<ProblemDialect | "all">("all")
   const [difficulty, setDifficulty] = useState<ProblemDifficulty | "all">("all")
-  const [selectedId, setSelectedId] = useState(learningProblems[0].id)
+  const [selectedId, setSelectedId] = useState("")
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [result, setResult] = useState<JudgeRunResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
+  const [catalogLoading, setCatalogLoading] = useState(true)
+  const [catalogError, setCatalogError] = useState<string | null>(null)
+  const [catalogReloadToken, setCatalogReloadToken] = useState(0)
+  const selectedProblemIdRef = useRef("")
+  const judgeGenerationRef = useRef(0)
+  const activeJudgeRequestRef = useRef<JudgeRequest | null>(null)
+  const activeRequestIdRef = useRef<string | null>(null)
 
+  function invalidateJudgeRequests() {
+    judgeGenerationRef.current += 1
+    activeJudgeRequestRef.current = null
+    activeRequestIdRef.current = null
+    setBusy(false)
+    setActiveRequestId(null)
+    setResult(null)
+  }
+
+  function selectProblem(problemId: string) {
+    if (selectedProblemIdRef.current !== problemId) {
+      invalidateJudgeRequests()
+      selectedProblemIdRef.current = problemId
+    }
+    setSelectedId(problemId)
+  }
+
+  function retryCatalogLoad() {
+    invalidateJudgeRequests()
+    setCatalogLoading(true)
+    setCatalogError(null)
+    setCatalogReloadToken((current) => current + 1)
+  }
+
+  useEffect(() => {
+    let active = true
+
+    function setLoadedProblem(problemId: string) {
+      if (selectedProblemIdRef.current !== problemId) {
+        judgeGenerationRef.current += 1
+        activeJudgeRequestRef.current = null
+        activeRequestIdRef.current = null
+        selectedProblemIdRef.current = problemId
+        setBusy(false)
+        setActiveRequestId(null)
+        setResult(null)
+      }
+      setSelectedId(problemId)
+    }
+
+    void listInstalledPacks()
+      .then((installedPacks) => {
+        if (!active) {
+          return
+        }
+        setPacks(installedPacks)
+        const firstProblem = installedPacks[0]?.problems[0]
+        const availableIds = new Set(
+          installedPacks.flatMap((pack) =>
+            pack.problems.map((problem) => catalogProblemKey(pack, problem.id))
+          )
+        )
+        const nextSelectedId =
+          selectedProblemIdRef.current &&
+          availableIds.has(selectedProblemIdRef.current)
+            ? selectedProblemIdRef.current
+            : firstProblem
+              ? catalogProblemKey(installedPacks[0], firstProblem.id)
+              : ""
+        setLoadedProblem(nextSelectedId)
+      })
+      .catch(() => {
+        if (!active) {
+          return
+        }
+        setPacks([])
+        setLoadedProblem("")
+        setCatalogError(learningLoadErrorMessage("catalog"))
+      })
+      .finally(() => {
+        if (active) {
+          setCatalogLoading(false)
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [catalogReloadToken])
+
+  const learningProblems = useMemo(() => catalogProblems(packs), [packs])
   const filteredProblems = useMemo(
     () => filterProblems(learningProblems, query, dialect, difficulty),
-    [difficulty, dialect, query]
+    [difficulty, dialect, learningProblems, query]
   )
-  const selectedProblem =
-    learningProblems.find((problem) => problem.id === selectedId) ??
-    filteredProblems[0] ??
-    learningProblems[0]
+  const selectedProblem = learningProblems.find(
+    (problem) => problem.id === selectedId
+  ) ??
+    filteredProblems[0] ?? {
+      id: "",
+      problemId: "",
+      title: "No imported problem pack",
+      difficulty: "easy" as const,
+      dialect: "postgresql" as const,
+      topics: [],
+      statement: "Import a validated pack to begin practicing.",
+      packId: "",
+      packVersion: "",
+      packDigest: "",
+      schema: [],
+      sampleRows: [],
+      starterSql: "",
+    }
   const draft = drafts[selectedProblem.id] ?? selectedProblem.starterSql
+  const completeMetadata = hasCompleteProblemMetadata(selectedProblem)
+
+  function updateDraft(value: string | undefined) {
+    setDrafts((current) => ({
+      ...current,
+      [selectedProblem.id]: (value ?? "").slice(0, MAX_SQL_LENGTH),
+    }))
+  }
 
   async function run(mode: "run" | "submit") {
+    if (!selectedProblem.id || !completeMetadata) {
+      return
+    }
+    const problemIdentity = selectedProblem.id
+    const request = beginJudgeRequest(
+      judgeGenerationRef.current,
+      problemIdentity
+    )
+    judgeGenerationRef.current = request.generation
     const requestId = crypto.randomUUID()
+    activeJudgeRequestRef.current = request
+    activeRequestIdRef.current = requestId
     setBusy(true)
     setActiveRequestId(requestId)
     setResult(null)
     try {
       const nextResult = await runJudge({
-        problemId: selectedProblem.id,
+        problemId: selectedProblem.problemId,
+        packId: selectedProblem.packId,
+        packVersion: selectedProblem.packVersion,
+        packDigest: selectedProblem.packDigest,
         sql: draft,
         mode,
         requestId,
       })
-      setResult(nextResult)
+      if (
+        isCurrentJudgeRequest(
+          request,
+          judgeGenerationRef.current,
+          selectedProblemIdRef.current
+        )
+      ) {
+        setResult(nextResult)
+      }
     } catch {
-      setResult({
-        status: "error",
-        durationMs: 0,
-        message:
-          "The native judge returned an unavailable or malformed response.",
-      })
+      if (
+        isCurrentJudgeRequest(
+          request,
+          judgeGenerationRef.current,
+          selectedProblemIdRef.current
+        )
+      ) {
+        setResult({
+          status: "error",
+          durationMs: 0,
+          message:
+            "The native judge returned an unavailable or malformed response.",
+        })
+      }
     } finally {
-      setBusy(false)
-      setActiveRequestId(null)
+      if (
+        isCurrentJudgeRequest(
+          request,
+          judgeGenerationRef.current,
+          selectedProblemIdRef.current
+        )
+      ) {
+        activeJudgeRequestRef.current = null
+        activeRequestIdRef.current = null
+        setBusy(false)
+        setActiveRequestId(null)
+      }
     }
   }
 
   async function cancelActiveJudge() {
-    if (activeRequestId) {
-      await cancelJudge(activeRequestId).catch(() => undefined)
+    const request = activeJudgeRequestRef.current
+    const requestId = activeRequestIdRef.current
+    if (request && requestId) {
+      await cancelJudge(requestId).catch(() => undefined)
     }
   }
 
@@ -169,7 +340,32 @@ export function LearningWorkspace() {
             </div>
           </CardHeader>
           <CardContent className="min-h-0 flex-1 overflow-y-auto p-2">
-            {filteredProblems.length === 0 ? (
+            {catalogLoading ? (
+              <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+                Loading installed problem packs...
+              </p>
+            ) : catalogError ? (
+              <div
+                className="rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-center text-xs"
+                role="alert"
+              >
+                <p className="text-destructive">{catalogError}</p>
+                <Button
+                  className="mt-3"
+                  variant="outline"
+                  size="sm"
+                  onClick={retryCatalogLoad}
+                >
+                  <RefreshCw />
+                  Retry
+                </Button>
+              </div>
+            ) : learningProblems.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+                No complete problem metadata is available. Import a validated
+                pack with problem manifests to begin practicing.
+              </div>
+            ) : filteredProblems.length === 0 ? (
               <div className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
                 No problems match these filters.
               </div>
@@ -185,8 +381,7 @@ export function LearningWorkspace() {
                     problem={problem}
                     selected={problem.id === selectedProblem.id}
                     onSelect={() => {
-                      setSelectedId(problem.id)
-                      setResult(null)
+                      selectProblem(problem.id)
                     }}
                   />
                 ))}
@@ -211,7 +406,18 @@ export function LearningWorkspace() {
                   variant="outline"
                   size="sm"
                   onClick={() => void run("run")}
-                  disabled={busy}
+                  disabled={
+                    busy ||
+                    catalogLoading ||
+                    catalogError !== null ||
+                    !selectedProblem.id ||
+                    !completeMetadata
+                  }
+                  title={
+                    completeMetadata
+                      ? undefined
+                      : "Complete schema, sample output, and starter SQL metadata is required"
+                  }
                 >
                   <Play />
                   Run sample
@@ -219,7 +425,18 @@ export function LearningWorkspace() {
                 <Button
                   size="sm"
                   onClick={() => void run("submit")}
-                  disabled={busy}
+                  disabled={
+                    busy ||
+                    catalogLoading ||
+                    catalogError !== null ||
+                    !selectedProblem.id ||
+                    !completeMetadata
+                  }
+                  title={
+                    completeMetadata
+                      ? undefined
+                      : "Complete schema, sample output, and starter SQL metadata is required"
+                  }
                 >
                   <Send />
                   Submit
@@ -239,24 +456,36 @@ export function LearningWorkspace() {
           </CardHeader>
           <CardContent className="flex min-h-0 flex-1 flex-col gap-3 p-3">
             <Label htmlFor="sql-editor">SQL editor</Label>
-            <textarea
-              id="sql-editor"
-              value={draft}
-              onChange={(event) =>
-                setDrafts((current) => ({
-                  ...current,
-                  [selectedProblem.id]: event.target.value,
-                }))
-              }
-              spellCheck={false}
-              className="min-h-52 flex-1 resize-none rounded-lg border border-input bg-[#10151d] p-4 font-mono text-[13px] leading-6 text-slate-100 shadow-inner outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-              aria-label={`SQL editor for ${selectedProblem.title}`}
-            />
+            <div className="min-h-52 flex-1 overflow-hidden rounded-lg border border-input bg-[#10151d] shadow-inner">
+              <Editor
+                height="100%"
+                language="sql"
+                theme="vs-dark"
+                value={draft}
+                onChange={updateDraft}
+                options={{
+                  ariaLabel: `SQL editor for ${selectedProblem.title}`,
+                  automaticLayout: true,
+                  fontSize: 13,
+                  lineNumbers: "on",
+                  minimap: { enabled: false },
+                  padding: { top: 12, bottom: 12 },
+                  scrollBeyondLastLine: false,
+                  tabSize: 2,
+                  wordWrap: "on",
+                }}
+              />
+            </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
               <span>UTF-8 · read-only policy · 64 KiB maximum</span>
               <span>{draft.length.toLocaleString()} characters</span>
             </div>
-            {result ? <ResultBanner result={result} /> : null}
+            {result ? (
+              <>
+                <ResultBanner result={result} />
+                <ResultTable result={result} />
+              </>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -286,32 +515,38 @@ export function LearningWorkspace() {
                 <Database className="size-3.5" /> Tables
               </h3>
               <div className="mt-2 space-y-2">
-                {selectedProblem.schema.map((table) => (
-                  <div
-                    key={table.name}
-                    className="rounded-lg border bg-muted/20 p-3"
-                  >
-                    <p className="font-mono text-xs font-semibold">
-                      {table.name}
-                    </p>
-                    <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
-                      {table.columns.map((column) => (
-                        <li
-                          key={column.name}
-                          className="flex items-center justify-between gap-2"
-                        >
-                          <span className="font-mono text-foreground">
-                            {column.name}
-                          </span>
-                          <span>
-                            {column.type}
-                            {column.nullable ? " · nullable" : ""}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ))}
+                {selectedProblem.schema.length === 0 ? (
+                  <p className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                    Schema metadata is unavailable for this problem.
+                  </p>
+                ) : (
+                  selectedProblem.schema.map((table) => (
+                    <div
+                      key={table.name}
+                      className="rounded-lg border bg-muted/20 p-3"
+                    >
+                      <p className="font-mono text-xs font-semibold">
+                        {table.name}
+                      </p>
+                      <ul className="mt-2 space-y-1.5 text-xs text-muted-foreground">
+                        {table.columns.map((column) => (
+                          <li
+                            key={column.name}
+                            className="flex items-center justify-between gap-2"
+                          >
+                            <span className="font-mono text-foreground">
+                              {column.name}
+                            </span>
+                            <span>
+                              {column.type}
+                              {column.nullable ? " · nullable" : ""}
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ))
+                )}
               </div>
             </section>
             <section aria-labelledby="topics-heading">
@@ -336,30 +571,39 @@ export function LearningWorkspace() {
               >
                 Public sample output
               </h3>
-              <div className="mt-2 overflow-x-auto rounded-lg border">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-muted/40 text-muted-foreground">
-                    <tr>
-                      {Object.keys(selectedProblem.sampleRows[0]).map((key) => (
-                        <th key={key} className="px-2 py-2 font-medium">
-                          {key}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedProblem.sampleRows.map((row, index) => (
-                      <tr key={index} className="border-t">
-                        {Object.values(row).map((value, valueIndex) => (
-                          <td key={valueIndex} className="px-2 py-2 font-mono">
-                            {value ?? "NULL"}
-                          </td>
+              {hasSampleData(selectedProblem) ? (
+                <div className="mt-2 overflow-x-auto rounded-lg border">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-muted/40 text-muted-foreground">
+                      <tr>
+                        {sampleColumns(selectedProblem).map((key) => (
+                          <th key={key} className="px-2 py-2 font-medium">
+                            {key}
+                          </th>
                         ))}
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {selectedProblem.sampleRows.map((row, index) => (
+                        <tr key={index} className="border-t">
+                          {Object.values(row).map((value, valueIndex) => (
+                            <td
+                              key={valueIndex}
+                              className="px-2 py-2 font-mono"
+                            >
+                              {value ?? "NULL"}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <p className="mt-2 rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+                  Public sample output is unavailable for this problem.
+                </p>
+              )}
             </section>
           </CardContent>
         </Card>
@@ -438,4 +682,91 @@ function ResultBanner({ result }: { result: JudgeRunResult }) {
       </div>
     </div>
   )
+}
+
+function ResultTable({ result }: { result: JudgeRunResult }) {
+  if (result.status !== "completed" || !result.columns?.length) {
+    return null
+  }
+
+  const columns = result.columns
+  const rows = result.rows ?? []
+  const visibleRows = rows.slice(0, MAX_RENDERED_ROWS)
+  const rowsTruncated = rows.length > visibleRows.length
+
+  return (
+    <section
+      aria-label="Query result"
+      className="min-w-0 overflow-hidden rounded-lg border"
+    >
+      <div className="flex items-center justify-between gap-3 border-b bg-muted/30 px-3 py-2 text-xs">
+        <span className="font-medium">Result preview</span>
+        <span className="text-muted-foreground">
+          {rowsTruncated
+            ? `Showing ${visibleRows.length} of ${rows.length} rows`
+            : `${rows.length} row${rows.length === 1 ? "" : "s"}`}
+        </span>
+      </div>
+      {visibleRows.length > 0 ? (
+        <div className="max-h-72 overflow-auto">
+          <table className="w-full text-left text-xs">
+            <thead className="sticky top-0 bg-background text-muted-foreground">
+              <tr>
+                {columns.map((column) => (
+                  <th
+                    key={column.name}
+                    className="border-b px-3 py-2 font-medium whitespace-nowrap"
+                  >
+                    <span>{column.name}</span>
+                    <span className="ml-1 font-normal opacity-60">
+                      {column.type}
+                    </span>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {visibleRows.map((row, rowIndex) => (
+                <tr key={rowIndex} className="border-t align-top">
+                  {columns.map((column, columnIndex) => {
+                    const value = formatResultValue(row[columnIndex])
+                    const displayValue = value.slice(
+                      0,
+                      MAX_RENDERED_CELL_LENGTH
+                    )
+                    return (
+                      <td
+                        key={`${column.name}-${columnIndex}`}
+                        className="max-w-64 px-3 py-2 font-mono break-words"
+                        title={value}
+                      >
+                        {displayValue}
+                        {value.length > displayValue.length ? "…" : ""}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className="p-4 text-center text-xs text-muted-foreground">
+          Query returned no rows.
+        </p>
+      )}
+    </section>
+  )
+}
+
+function formatResultValue(
+  value: string | number | boolean | null | undefined
+) {
+  if (value === null || value === undefined) {
+    return "NULL"
+  }
+  if (typeof value === "boolean") {
+    return value ? "true" : "false"
+  }
+  return String(value)
 }

@@ -69,6 +69,8 @@ impl EnvironmentLedger {
             ));
         }
         replacement.pack_id = source.pack_id.clone();
+        replacement.pack_version = source.pack_version.clone();
+        replacement.pack_digest = source.pack_digest.clone();
         self.create(replacement.clone())?;
         Ok(replacement)
     }
@@ -140,6 +142,8 @@ impl EnvironmentLedger {
         let current = self.records.get(env_id).ok_or(LifecycleError::NotFound)?;
         authorize_lifecycle_completion(current, action, EnvironmentState::Rebuilding)?;
         let pack_id = current.pack_id.clone();
+        let pack_version = current.pack_version.clone();
+        let pack_digest = current.pack_digest.clone();
         validate_replacement(current, &replacement)?;
         if !validate(&replacement) {
             self.records
@@ -166,6 +170,8 @@ impl EnvironmentLedger {
         }
         replacement.env_id = env_id.to_owned();
         replacement.pack_id = pack_id;
+        replacement.pack_version = pack_version;
+        replacement.pack_digest = pack_digest;
         replacement.state = EnvironmentState::Ready;
         self.records.insert(env_id.to_owned(), replacement);
         Ok(())

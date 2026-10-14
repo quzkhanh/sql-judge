@@ -2,10 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react"
 
 import { AppSidebar, type AppRoute } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
-import {
-  SidebarInset,
-  SidebarProvider,
-} from "@/components/ui/sidebar"
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { ConnectionsScreen } from "@/features/learning/connections-screen"
 import { EnvironmentsScreen } from "@/features/learning/environments-screen"

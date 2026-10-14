@@ -1,0 +1,18 @@
+[package]
+name = "judge-sqlserver"
+version = "0.1.0"
+edition = "2024"
+
+[features]
+sqlserver-integration = []
+
+[dependencies]
+judge-core = { path = "../judge-core" }
+tiberius = { version = "0.13.0", default-features = false, features = ["tds73", "native-tls"] }
+futures-util = "0.3"
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["net", "rt-multi-thread", "time"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+
+[dev-dependencies]

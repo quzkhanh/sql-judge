@@ -26,6 +26,8 @@ pub struct EnvironmentRecord {
     pub env_id: String,
     pub instance_id: String,
     pub pack_id: String,
+    pub pack_version: String,
+    pub pack_digest: String,
     pub namespace: String,
     pub ownership_nonce: String,
     pub mode: EnvironmentMode,

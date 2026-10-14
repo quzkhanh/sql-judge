@@ -25,12 +25,7 @@ import {
 } from "@/components/ui/sidebar"
 
 export type AppRoute =
-  | "practice"
-  | "environments"
-  | "history"
-  | "progress"
-  | "packs"
-  | "connections"
+  "practice" | "environments" | "history" | "progress" | "packs" | "connections"
 
 const navigation: Array<{
   route: AppRoute
@@ -108,7 +103,9 @@ export function AppSidebar({
           <ChartNoAxesColumn className="size-4 text-sidebar-foreground/60" />
           <div className="min-w-0">
             <p className="truncate font-medium">SQL learner</p>
-            <p className="truncate text-sidebar-foreground/60">Local workspace</p>
+            <p className="truncate text-sidebar-foreground/60">
+              Local workspace
+            </p>
           </div>
         </div>
       </SidebarFooter>

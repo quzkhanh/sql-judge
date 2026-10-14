@@ -12,7 +12,9 @@ createRoot(document.getElementById("root")!).render(
     <ThemeProvider>
       <ExternalLinkGuard />
       {import.meta.env.DEV ? <DebugPanel /> : null}
-      <main data-ui-scroll-container><App /></main>
+      <main data-ui-scroll-container>
+        <App />
+      </main>
     </ThemeProvider>
   </StrictMode>
 )

@@ -1,6 +1,7 @@
 use judge_core::{Column, LogicalType, OutputPolicy, QueryLimits, RowOrder, SqlValue, Verdict};
 use judge_postgres::{
-    CancellationToken, JudgeCase, ManagedEnvironment, PostgresSession, QueryExecutionError,
+    CancellationToken, ExternalPostgresConfig, ExternalPostgresError, ExternalPostgresExplorer,
+    ExternalTlsMode, JudgeCase, ManagedEnvironment, PostgresSession, QueryExecutionError,
     judge_submission, judge_submission_with_cancel, judge_submission_with_watchdog,
 };
 use std::io::Write;
@@ -85,11 +86,13 @@ impl TestServer {
         let password = format!("sqljudge_test_{}", std::process::id());
         let setup = format!(
             "CREATE ROLE sqljudge_runner LOGIN PASSWORD '{password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT;\
+             REVOKE CREATE, TEMPORARY ON DATABASE sqljudge_test FROM PUBLIC;\
              REVOKE CREATE ON SCHEMA public FROM PUBLIC;\
              GRANT USAGE ON SCHEMA public TO sqljudge_runner;\
              CREATE TABLE public.sample (id integer NOT NULL, label text);\
              INSERT INTO public.sample VALUES (1, 'one'), (2, NULL);\
-             GRANT SELECT ON public.sample TO sqljudge_runner;"
+             GRANT SELECT ON public.sample TO sqljudge_runner;\
+             CREATE SEQUENCE public.sample_seq;"
         );
         let mut setup_process = Command::new("psql")
             .args([
@@ -138,6 +141,27 @@ impl TestServer {
             std::env::var("USER").expect("USER must identify the local test owner")
         )
     }
+
+    fn run_admin_sql(&self, sql: &str) {
+        let mut process = Command::new("psql")
+            .args([
+                "-h",
+                self.socket_dir.to_str().expect("socket path"),
+                "-p",
+                &self.port.to_string(),
+                "-d",
+                "sqljudge_test",
+                "-v",
+                "ON_ERROR_STOP=1",
+                "-c",
+                sql,
+            ])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start admin SQL");
+        assert!(process.wait().expect("wait for admin SQL").success());
+    }
 }
 
 impl Drop for TestServer {
@@ -176,6 +200,141 @@ fn session_decodes_typed_rows_and_nulls() {
     assert_eq!(result.columns[1].logical_type, LogicalType::Text);
     assert_eq!(result.rows[0][0], SqlValue::Signed(1));
     assert_eq!(result.rows[1][1], SqlValue::Null);
+}
+
+#[test]
+fn external_explorer_tests_connection_metadata_and_bounded_select() {
+    let server = TestServer::start();
+    let mut explorer = ExternalPostgresExplorer::connect(ExternalPostgresConfig {
+        host: "127.0.0.1".to_owned(),
+        port: server.port,
+        database: "sqljudge_test".to_owned(),
+        username: "sqljudge_runner".to_owned(),
+        password: server.password.clone(),
+        tls_mode: ExternalTlsMode::Disable,
+        allow_insecure_local: true,
+    })
+    .expect("connect external explorer");
+
+    let connection = explorer
+        .test_connection()
+        .expect("test external connection");
+    assert_eq!(connection.database, "sqljudge_test");
+    assert_eq!(connection.username, "sqljudge_runner");
+    assert!(connection.read_only);
+
+    let metadata = explorer
+        .list_metadata(QueryLimits::new(2_000, 100, 64 * 1024))
+        .expect("list external metadata");
+    let sample = metadata
+        .tables
+        .iter()
+        .find(|table| table.schema == "public" && table.name == "sample")
+        .expect("sample table metadata");
+    assert_eq!(sample.columns[0].name, "id");
+
+    let result = explorer
+        .execute_select(
+            "SELECT id, label FROM public.sample ORDER BY id",
+            QueryLimits::new(2_000, 2, 64 * 1024),
+        )
+        .expect("bounded external select");
+    assert_eq!(result.rows.len(), 2);
+    assert!(matches!(
+        explorer.execute_select(
+            "SELECT generate_series(1, 4)",
+            QueryLimits::new(2_000, 2, 64 * 1024),
+        ),
+        Err(ExternalPostgresError::ResultLimitExceeded)
+    ));
+    assert!(matches!(
+        explorer.execute_select(
+            "SELECT setval('public.sample_seq', 10)",
+            QueryLimits::new(2_000, 2, 64 * 1024),
+        ),
+        Err(ExternalPostgresError::DatabaseError)
+    ));
+}
+
+#[test]
+fn external_connection_rejects_effective_write_capabilities() {
+    let server = TestServer::start();
+    for (grant, revoke) in [
+        (
+            "GRANT INSERT ON TABLE public.sample TO sqljudge_runner",
+            "REVOKE INSERT ON TABLE public.sample FROM sqljudge_runner",
+        ),
+        (
+            "GRANT CREATE ON SCHEMA public TO sqljudge_runner",
+            "REVOKE CREATE ON SCHEMA public FROM sqljudge_runner",
+        ),
+        (
+            "GRANT CREATE ON DATABASE sqljudge_test TO sqljudge_runner",
+            "REVOKE CREATE ON DATABASE sqljudge_test FROM sqljudge_runner",
+        ),
+        (
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT INSERT ON TABLES TO sqljudge_runner",
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE INSERT ON TABLES FROM sqljudge_runner",
+        ),
+    ] {
+        server.run_admin_sql(grant);
+        let mut explorer = ExternalPostgresExplorer::connect(ExternalPostgresConfig {
+            host: "127.0.0.1".to_owned(),
+            port: server.port,
+            database: "sqljudge_test".to_owned(),
+            username: "sqljudge_runner".to_owned(),
+            password: server.password.clone(),
+            tls_mode: ExternalTlsMode::Disable,
+            allow_insecure_local: true,
+        })
+        .expect("connect external explorer");
+        assert!(
+            !explorer
+                .test_connection()
+                .expect("test external connection")
+                .read_only,
+            "effective write capability must not be hidden by BEGIN READ ONLY: {grant}"
+        );
+        server.run_admin_sql(revoke);
+    }
+}
+
+#[test]
+fn external_explorer_maps_wrong_credentials_without_returning_driver_text() {
+    let server = TestServer::start();
+    let result = ExternalPostgresExplorer::connect(ExternalPostgresConfig {
+        host: "127.0.0.1".to_owned(),
+        port: server.port,
+        database: "sqljudge_test".to_owned(),
+        username: "sqljudge_runner".to_owned(),
+        password: "wrong-secret-canary".to_owned(),
+        tls_mode: ExternalTlsMode::Disable,
+        allow_insecure_local: true,
+    });
+    assert!(matches!(
+        result,
+        Err(ExternalPostgresError::AuthenticationFailed)
+    ));
+}
+
+#[test]
+fn external_explorer_maps_offline_server_without_secret_leak() {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("reserve offline port");
+    let port = listener.local_addr().expect("read offline port").port();
+    drop(listener);
+    let result = ExternalPostgresExplorer::connect(ExternalPostgresConfig {
+        host: "127.0.0.1".to_owned(),
+        port,
+        database: "sqljudge_test".to_owned(),
+        username: "reader".to_owned(),
+        password: "offline-secret-canary".to_owned(),
+        tls_mode: ExternalTlsMode::Disable,
+        allow_insecure_local: true,
+    });
+    assert!(matches!(
+        result,
+        Err(ExternalPostgresError::ServerUnreachable)
+    ));
 }
 
 #[test]
@@ -349,11 +508,17 @@ fn managed_namespace_schema_setup_isolated_between_environments() {
     admin
         .provision_managed_namespace_with_schema(&first, "sqljudge_runner", schema_sql)
         .expect("provision first schema");
+    assert!(
+        admin
+            .managed_namespace_has_schema(&first)
+            .expect("inspect first schema")
+    );
     admin
         .provision_managed_namespace_with_schema(&second, "sqljudge_runner", schema_sql)
         .expect("provision second schema");
 
-    let first_rows = admin
+    let mut runner = PostgresSession::connect(&server.connection_string()).expect("connect runner");
+    let first_rows = runner
         .execute(
             "SELECT name FROM \"sj_env_a\".employees",
             QueryLimits::new(2_000, 10, 64 * 1024),
@@ -368,6 +533,81 @@ fn managed_namespace_schema_setup_isolated_between_environments() {
 
     assert_eq!(first_rows.rows, second_rows.rows);
     assert_eq!(first_rows.rows[0][0], SqlValue::Text("first".to_owned()));
+}
+
+#[test]
+fn managed_schema_sql_runs_as_constrained_runner_and_cannot_escape_namespace() {
+    let server = TestServer::start();
+    let mut admin =
+        PostgresSession::connect(&server.admin_connection_string()).expect("connect admin");
+    let environment = ManagedEnvironment::new(
+        "env-constrained-schema",
+        "instance-constrained-schema",
+        "sj_constrained_schema",
+        "nonce-constrained-schema",
+    )
+    .expect("valid managed environment");
+
+    admin
+        .provision_managed_namespace_with_schema(
+            &environment,
+            "sqljudge_runner",
+            "CREATE TABLE employees (id integer);",
+        )
+        .expect("provision constrained schema");
+
+    let ownership = admin
+        .execute(
+            "SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_catalog.pg_class table_entry
+                        JOIN pg_catalog.pg_namespace namespace_entry
+                          ON namespace_entry.oid = table_entry.relnamespace
+                        JOIN pg_catalog.pg_roles role_entry
+                          ON role_entry.oid = table_entry.relowner
+                        WHERE namespace_entry.nspname = 'sj_constrained_schema'
+                          AND table_entry.relname = 'employees'
+                          AND role_entry.rolname = 'sqljudge_runner'
+                    )
+             ",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("inspect constrained schema ownership");
+    assert_eq!(ownership.rows, vec![vec![SqlValue::Bool(true)]]);
+    let create_privilege = admin
+        .execute(
+            "SELECT has_schema_privilege('sqljudge_runner', 'sj_constrained_schema', 'CREATE')",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("inspect constrained CREATE privilege");
+    let usage_privilege = admin
+        .execute(
+            "SELECT has_schema_privilege('sqljudge_runner', 'sj_constrained_schema', 'USAGE')",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("inspect constrained USAGE privilege");
+    assert_eq!(create_privilege.rows, vec![vec![SqlValue::Bool(false)]]);
+    assert_eq!(usage_privilege.rows, vec![vec![SqlValue::Bool(true)]]);
+
+    assert_eq!(
+        admin.provision_managed_namespace_with_schema(
+            &environment,
+            "sqljudge_runner",
+            "CREATE TABLE public.pack_escape_probe (id integer);",
+        ),
+        Err(QueryExecutionError::PolicyViolation)
+    );
+    let escape_probe = admin
+        .execute(
+            "SELECT to_regclass('public.pack_escape_probe') IS NULL",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("inspect rejected escape probe");
+    assert_eq!(escape_probe.rows, vec![vec![SqlValue::Bool(true)]]);
+
+    admin
+        .drop_managed_namespace(&environment)
+        .expect("drop constrained namespace");
 }
 
 #[test]
@@ -389,6 +629,24 @@ fn managed_namespace_drop_requires_owned_marker() {
             .managed_namespace_is_owned(&environment)
             .expect("inspect owned namespace")
     );
+    let marker_only = ManagedEnvironment::new(
+        "env-marker-only",
+        "instance-marker-only",
+        "sj_marker_only",
+        "nonce-marker-only",
+    )
+    .expect("valid marker-only environment");
+    admin
+        .provision_managed_namespace(&marker_only, "sqljudge_runner")
+        .expect("provision marker-only namespace");
+    assert!(
+        !admin
+            .managed_namespace_has_schema(&marker_only)
+            .expect("inspect marker-only namespace")
+    );
+    admin
+        .drop_managed_namespace(&marker_only)
+        .expect("drop marker-only namespace");
 
     let forged = ManagedEnvironment::new("env-a", "instance-a", "sj_env_a", "forged")
         .expect("valid forged shape");
@@ -410,6 +668,96 @@ fn managed_namespace_drop_requires_owned_marker() {
             QueryLimits::new(2_000, 10, 64 * 1024),
         ),
         Err(QueryExecutionError::RuntimeError)
+    );
+}
+
+#[test]
+fn failed_schema_setup_removes_only_the_new_owned_namespace() {
+    let server = TestServer::start();
+    let mut admin =
+        PostgresSession::connect(&server.admin_connection_string()).expect("connect admin");
+    let untouched = ManagedEnvironment::new(
+        "env-untouched-setup-failure",
+        "instance-untouched-setup-failure",
+        "sj_untouched_setup_failure",
+        "nonce-untouched-setup-failure",
+    )
+    .expect("valid untouched environment");
+    let environment = ManagedEnvironment::new(
+        "env-setup-failure",
+        "instance-setup-failure",
+        "sj_setup_failure",
+        "nonce-setup-failure",
+    )
+    .expect("valid managed environment");
+    admin
+        .provision_managed_namespace(&untouched, "sqljudge_runner")
+        .expect("provision untouched namespace");
+
+    let result = admin.provision_managed_namespace_with_schema(
+        &environment,
+        "sqljudge_runner",
+        "CREATE TABLE employees (id integer); INSERT INTO missing_table VALUES (1);",
+    );
+
+    assert_eq!(result, Err(QueryExecutionError::RuntimeError));
+    assert!(
+        !admin
+            .managed_namespace_is_owned(&environment)
+            .expect("inspect cleanup namespace")
+    );
+    assert!(
+        admin
+            .managed_namespace_is_owned(&untouched)
+            .expect("inspect untouched namespace")
+    );
+    admin
+        .drop_managed_namespace(&untouched)
+        .expect("drop untouched namespace");
+}
+
+#[test]
+fn failed_schema_setup_preserves_a_preexisting_owned_namespace() {
+    let server = TestServer::start();
+    let mut admin =
+        PostgresSession::connect(&server.admin_connection_string()).expect("connect admin");
+    let environment = ManagedEnvironment::new(
+        "env-existing-setup-failure",
+        "instance-existing-setup-failure",
+        "sj_existing_setup_failure",
+        "nonce-existing-setup-failure",
+    )
+    .expect("valid managed environment");
+
+    admin
+        .provision_managed_namespace_with_schema(
+            &environment,
+            "sqljudge_runner",
+            "CREATE TABLE existing_table (id integer);",
+        )
+        .expect("provision existing namespace");
+    let result = admin.provision_managed_namespace_with_schema(
+        &environment,
+        "sqljudge_runner",
+        "CREATE TABLE new_table (id integer); INSERT INTO missing_table VALUES (1);",
+    );
+
+    assert_eq!(result, Err(QueryExecutionError::RuntimeError));
+    assert!(
+        admin
+            .managed_namespace_is_owned(&environment)
+            .expect("inspect preserved namespace")
+    );
+    assert_eq!(
+        admin
+            .execute(
+                "SELECT id FROM \"sj_existing_setup_failure\".existing_table",
+                QueryLimits::new(2_000, 10, 64 * 1024),
+            )
+            .expect("read preserved table")
+            .rows
+            .len(),
+        0
     );
 }
 
@@ -478,6 +826,35 @@ fn watchdog_timeout_is_distinct_from_user_cancellation() {
         )
         .expect("inspect temporary fixture cleanup");
     assert_eq!(leftovers.rows[0][0], SqlValue::Signed(0));
+}
+
+#[test]
+fn orchestrator_returns_user_result_preview_for_completed_case() {
+    let server = TestServer::start();
+    let mut admin =
+        PostgresSession::connect(&server.admin_connection_string()).expect("connect admin");
+    let report = judge_submission(
+        &mut admin,
+        "sqljudge_runner",
+        &[JudgeCase {
+            id: "preview",
+            schema_sql: "CREATE TABLE values_table (id integer);",
+            fixture_sql: "INSERT INTO values_table VALUES (1);",
+            reference_sql: "SELECT 1 AS id",
+            output: OutputPolicy::new(
+                RowOrder::Ordered,
+                true,
+                true,
+                vec![Column::new("id", LogicalType::Integer)],
+            ),
+            limits: QueryLimits::new(2_000, 10, 64 * 1024),
+        }],
+        "SELECT 1 AS id",
+    );
+
+    let preview = report.preview.expect("completed user preview");
+    assert_eq!(preview.columns[0].name, "id");
+    assert_eq!(preview.rows, vec![vec![SqlValue::Signed(1)]]);
 }
 
 #[test]

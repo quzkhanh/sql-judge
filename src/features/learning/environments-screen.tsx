@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { Database, Plus, RefreshCw, RotateCcw, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -10,71 +10,145 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
+import { AccessibleModal } from "@/components/ui/accessible-modal"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   createManagedEnvironment,
   deleteManagedEnvironment,
   getManagedRuntimeStatus,
+  listInstalledPacks,
   listManagedEnvironments,
   resetManagedEnvironment,
   startManagedRuntime,
   type ManagedEnvironmentSummary,
+  type InstalledPack,
   type ManagedRuntimeStatus,
 } from "@/lib/judge-api"
 import { cn } from "@/lib/utils"
+import {
+  describeEnvironmentImpact,
+  isDestructiveActionAvailable,
+  type EnvironmentAction,
+} from "./environment-impact"
+import { learningLoadErrorMessage, learningLoadPhase } from "./load-state"
+
+type PendingAction = {
+  action: EnvironmentAction
+  environment: ManagedEnvironmentSummary
+  replacementNamespace?: string
+}
+
+function packKey(pack: InstalledPack): string {
+  return `${pack.packId}@${pack.version}#${pack.digest}`
+}
 
 export function EnvironmentsScreen() {
   const [runtimeStatus, setRuntimeStatus] =
     useState<ManagedRuntimeStatus | null>(null)
+  const [packs, setPacks] = useState<InstalledPack[]>([])
+  const [selectedPackKey, setSelectedPackKey] = useState("")
   const [environments, setEnvironments] = useState<ManagedEnvironmentSummary[]>(
     []
   )
   const [namespace, setNamespace] = useState("sj_practice")
   const [busy, setBusy] = useState(true)
   const [message, setMessage] = useState<string | null>(null)
+  const [environmentLoading, setEnvironmentLoading] = useState(true)
+  const [environmentError, setEnvironmentError] = useState<string | null>(null)
+  const [environmentReloadToken, setEnvironmentReloadToken] = useState(0)
+  const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
 
-  async function refresh() {
+  async function refresh(): Promise<boolean> {
+    setEnvironmentLoading(true)
+    setEnvironmentError(null)
     setBusy(true)
     try {
-      const [status, records] = await Promise.all([
+      const [status, records, installedPacks] = await Promise.all([
         getManagedRuntimeStatus(),
         listManagedEnvironments(),
+        listInstalledPacks(),
       ])
       setRuntimeStatus(status)
       setEnvironments(records)
+      setPacks(installedPacks)
+      setSelectedPackKey(
+        (current) =>
+          current || (installedPacks[0] ? packKey(installedPacks[0]) : "")
+      )
+      setEnvironmentError(null)
       setMessage(null)
+      return true
     } catch {
+      setRuntimeStatus(null)
+      setEnvironments([])
+      setPacks([])
+      setSelectedPackKey("")
+      setPendingAction(null)
+      setEnvironmentError(learningLoadErrorMessage("environments"))
       setMessage("Managed environments could not be loaded.")
+      return false
     } finally {
+      setEnvironmentLoading(false)
       setBusy(false)
     }
   }
 
+  function retryEnvironmentLoad() {
+    setEnvironmentLoading(true)
+    setEnvironmentError(null)
+    setBusy(true)
+    setEnvironmentReloadToken((current) => current + 1)
+  }
+
   useEffect(() => {
     let active = true
-    void Promise.all([getManagedRuntimeStatus(), listManagedEnvironments()])
-      .then(([status, records]) => {
+    void Promise.all([
+      getManagedRuntimeStatus(),
+      listManagedEnvironments(),
+      listInstalledPacks(),
+    ])
+      .then(([status, records, installedPacks]) => {
         if (active) {
           setRuntimeStatus(status)
           setEnvironments(records)
+          setPacks(installedPacks)
+          setSelectedPackKey(
+            (current) =>
+              current || (installedPacks[0] ? packKey(installedPacks[0]) : "")
+          )
+          setEnvironmentError(null)
           setMessage(null)
         }
       })
       .catch(() => {
         if (active) {
-          setMessage("Managed environments could not be loaded.")
+          setRuntimeStatus(null)
+          setEnvironments([])
+          setPacks([])
+          setSelectedPackKey("")
+          setPendingAction(null)
+          setEnvironmentError(learningLoadErrorMessage("environments"))
         }
       })
       .finally(() => {
         if (active) {
+          setEnvironmentLoading(false)
           setBusy(false)
         }
       })
     return () => {
       active = false
     }
-  }, [])
+  }, [environmentReloadToken])
+
+  const selectedPack =
+    packs.find((pack) => packKey(pack) === selectedPackKey) ?? null
+  const environmentPhase = learningLoadPhase(
+    environmentLoading,
+    environmentError,
+    environments.length > 0
+  )
 
   async function startRuntime() {
     setBusy(true)
@@ -94,14 +168,26 @@ export function EnvironmentsScreen() {
       setMessage("Enter a managed schema namespace first.")
       return
     }
+    if (!selectedPack) {
+      setMessage("Import the managed pack before creating an environment.")
+      return
+    }
     setBusy(true)
     try {
       await createManagedEnvironment({
         envId: "practice",
-        packId: "hr-sql-101",
+        packId: selectedPack.packId,
+        packVersion: selectedPack.version,
+        packDigest: selectedPack.digest,
         namespace: nextNamespace,
       })
-      await refresh()
+      const refreshed = await refresh()
+      if (!refreshed) {
+        setMessage(
+          "Practice environment was created, but the environment list could not be refreshed. Retry to verify its state."
+        )
+        return
+      }
       setMessage("Practice environment is ready.")
     } catch {
       setMessage("Practice environment could not be provisioned.")
@@ -109,50 +195,66 @@ export function EnvironmentsScreen() {
     }
   }
 
-  async function resetEnvironment(environment: ManagedEnvironmentSummary) {
+  function requestReset(environment: ManagedEnvironmentSummary) {
     const nextNamespace = namespace.trim()
-    if (
-      !nextNamespace ||
-      !window.confirm(`Replace ${environment.namespace} with ${nextNamespace}?`)
-    ) {
+    if (!nextNamespace) {
+      setMessage("Enter a managed schema namespace first.")
       return
     }
-    setBusy(true)
-    try {
-      await resetManagedEnvironment({
-        envId: environment.envId,
-        instanceId: environment.instanceId,
-        namespace: nextNamespace,
-        confirmed: true,
-      })
-      await refresh()
-      setMessage("Environment rebuilt and old schema cleaned up.")
-    } catch {
-      setMessage("Environment rebuild failed closed.")
-      setBusy(false)
-    }
+    setPendingAction({
+      action: "reset",
+      environment,
+      replacementNamespace: nextNamespace,
+    })
   }
 
-  async function deleteEnvironment(environment: ManagedEnvironmentSummary) {
-    if (
-      !window.confirm(
-        `Delete ${environment.envId} and schema ${environment.namespace}? This cannot be undone.`
-      )
-    ) {
+  function requestDelete(environment: ManagedEnvironmentSummary) {
+    setPendingAction({ action: "delete", environment })
+  }
+
+  async function confirmPendingAction() {
+    if (!pendingAction) {
       return
     }
     setBusy(true)
     try {
-      await deleteManagedEnvironment({
-        envId: environment.envId,
-        instanceId: environment.instanceId,
-        confirmed: true,
-      })
-      await refresh()
-      setMessage("Environment deleted.")
+      if (pendingAction.action === "reset") {
+        await resetManagedEnvironment({
+          envId: pendingAction.environment.envId,
+          instanceId: pendingAction.environment.instanceId,
+          namespace: pendingAction.replacementNamespace ?? namespace.trim(),
+          confirmed: true,
+        })
+      } else {
+        await deleteManagedEnvironment({
+          envId: pendingAction.environment.envId,
+          instanceId: pendingAction.environment.instanceId,
+          confirmed: true,
+        })
+      }
+      const refreshed = await refresh()
+      if (!refreshed) {
+        setMessage(
+          pendingAction.action === "reset"
+            ? "Environment rebuild completed, but the environment list could not be refreshed. Retry to verify its state."
+            : "Environment deletion completed, but the environment list could not be refreshed. Retry to verify its state."
+        )
+        return
+      }
+      setMessage(
+        pendingAction.action === "reset"
+          ? "Environment rebuilt and old schema cleaned up."
+          : "Environment deleted."
+      )
     } catch {
-      setMessage("Environment deletion failed closed.")
+      setMessage(
+        pendingAction.action === "reset"
+          ? "Environment rebuild failed closed."
+          : "Environment deletion failed closed."
+      )
       setBusy(false)
+    } finally {
+      setPendingAction(null)
     }
   }
 
@@ -171,7 +273,11 @@ export function EnvironmentsScreen() {
               Create isolated, app-owned PostgreSQL schemas for practice packs.
             </p>
           </div>
-          <Button variant="outline" onClick={() => void refresh()} disabled={busy}>
+          <Button
+            variant="outline"
+            onClick={() => void refresh()}
+            disabled={busy}
+          >
             <RefreshCw className={cn(busy && "animate-spin")} />
             Refresh
           </Button>
@@ -184,7 +290,8 @@ export function EnvironmentsScreen() {
                 <Database className="size-4" /> Runtime
               </CardTitle>
               <CardDescription>
-                The managed runner is local, socket-only, and isolated from external databases.
+                The managed runner is local, socket-only, and isolated from
+                external databases.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -198,7 +305,9 @@ export function EnvironmentsScreen() {
                 />
                 <div>
                   <p className="text-sm font-medium">
-                    {runtimeStatus?.available ? "Runtime ready" : "Runtime unavailable"}
+                    {runtimeStatus?.available
+                      ? "Runtime ready"
+                      : "Runtime unavailable"}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {runtimeStatus?.message ?? "Checking managed PostgreSQL..."}
@@ -211,8 +320,8 @@ export function EnvironmentsScreen() {
                 </Button>
               ) : null}
               <div className="rounded-lg bg-muted/40 p-3 text-xs leading-5 text-muted-foreground">
-                Destructive actions require a managed ownership marker, matching instance identity,
-                and explicit confirmation in the desktop app.
+                Destructive actions require a managed ownership marker, matching
+                instance identity, and explicit confirmation in the desktop app.
               </div>
             </CardContent>
           </Card>
@@ -227,6 +336,30 @@ export function EnvironmentsScreen() {
             <CardContent className="space-y-4">
               <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
                 <div className="flex-1 space-y-1.5">
+                  <Label htmlFor="environment-pack">Pack</Label>
+                  <select
+                    id="environment-pack"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                    value={selectedPackKey}
+                    onChange={(event) => setSelectedPackKey(event.target.value)}
+                    disabled={
+                      busy ||
+                      environmentLoading ||
+                      environmentError !== null ||
+                      packs.length === 0
+                    }
+                  >
+                    {packs.length === 0 ? (
+                      <option value="">No imported packs</option>
+                    ) : null}
+                    {packs.map((pack) => (
+                      <option key={packKey(pack)} value={packKey(pack)}>
+                        {pack.title} v{pack.version}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex-1 space-y-1.5">
                   <Label htmlFor="environment-namespace">New namespace</Label>
                   <Input
                     id="environment-namespace"
@@ -236,16 +369,61 @@ export function EnvironmentsScreen() {
                     className="font-mono"
                   />
                 </div>
-                <Button onClick={() => void createEnvironment()} disabled={busy}>
+                <Button
+                  onClick={() => void createEnvironment()}
+                  disabled={
+                    busy || environmentLoading || environmentError !== null
+                  }
+                >
                   <Plus />
                   Create
                 </Button>
               </div>
+              <p className="text-xs text-muted-foreground">
+                {selectedPack
+                  ? `Pinned pack ${selectedPack.version} (${selectedPack.digest.slice(0, 12)}...)`
+                  : "The managed pack is not installed."}
+              </p>
 
-              {environments.length > 0 ? (
+              {pendingAction && environmentPhase === "ready" ? (
+                <ImpactReview
+                  pendingAction={pendingAction}
+                  busy={busy}
+                  onCancel={() => setPendingAction(null)}
+                  onConfirm={() => void confirmPendingAction()}
+                />
+              ) : null}
+
+              {environmentPhase === "loading" ? (
+                <p
+                  className="rounded-lg border border-dashed p-8 text-center text-sm text-muted-foreground"
+                  role="status"
+                >
+                  Loading managed environments...
+                </p>
+              ) : environmentPhase === "error" ? (
+                <div
+                  className="rounded-lg border border-destructive/30 bg-destructive/5 p-8 text-center"
+                  role="alert"
+                >
+                  <p className="text-sm text-destructive">{environmentError}</p>
+                  <Button
+                    className="mt-3"
+                    variant="outline"
+                    size="sm"
+                    onClick={retryEnvironmentLoad}
+                  >
+                    <RefreshCw />
+                    Retry
+                  </Button>
+                </div>
+              ) : environmentPhase === "ready" ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   {environments.map((environment) => (
-                    <div key={environment.envId} className="rounded-lg border p-3">
+                    <div
+                      key={environment.envId}
+                      className="rounded-lg border p-3"
+                    >
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <p className="truncate font-mono text-sm font-semibold">
@@ -255,7 +433,13 @@ export function EnvironmentsScreen() {
                             {environment.envId} · {environment.packId}
                           </p>
                         </div>
-                        <Badge variant={environment.state === "ready" ? "secondary" : "outline"}>
+                        <Badge
+                          variant={
+                            environment.state === "ready"
+                              ? "secondary"
+                              : "outline"
+                          }
+                        >
                           {environment.state}
                         </Badge>
                       </div>
@@ -263,8 +447,15 @@ export function EnvironmentsScreen() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => void resetEnvironment(environment)}
-                          disabled={busy || environment.state !== "ready"}
+                          onClick={() => requestReset(environment)}
+                          disabled={
+                            environmentPhase !== "ready" ||
+                            !isDestructiveActionAvailable(
+                              "reset",
+                              environment,
+                              busy
+                            )
+                          }
                         >
                           <RotateCcw />
                           Reset
@@ -272,8 +463,15 @@ export function EnvironmentsScreen() {
                         <Button
                           variant="ghost"
                           size="icon"
-                          onClick={() => void deleteEnvironment(environment)}
-                          disabled={busy || environment.state !== "ready"}
+                          onClick={() => requestDelete(environment)}
+                          disabled={
+                            environmentPhase !== "ready" ||
+                            !isDestructiveActionAvailable(
+                              "delete",
+                              environment,
+                              busy
+                            )
+                          }
                           aria-label={`Delete ${environment.namespace}`}
                         >
                           <Trash2 />
@@ -297,5 +495,75 @@ export function EnvironmentsScreen() {
         </div>
       </div>
     </main>
+  )
+}
+
+function ImpactReview({
+  pendingAction,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  pendingAction: PendingAction
+  busy: boolean
+  onCancel: () => void
+  onConfirm: () => void
+}) {
+  const cancelRef = useRef<HTMLButtonElement>(null)
+  const impact = describeEnvironmentImpact(
+    pendingAction.action,
+    pendingAction.environment
+  )
+
+  return (
+    <AccessibleModal
+      open
+      title="Review environment impact"
+      description={impact.summary}
+      busy={busy}
+      initialFocusRef={cancelRef}
+      onCancel={onCancel}
+    >
+      <dl className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+        <div>
+          <dt className="text-muted-foreground">Environment</dt>
+          <dd className="font-mono font-medium">{impact.environmentId}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">Managed namespace</dt>
+          <dd className="font-mono font-medium">
+            {pendingAction.action === "reset"
+              ? `${impact.namespace} -> ${pendingAction.replacementNamespace}`
+              : impact.namespace}
+          </dd>
+        </div>
+      </dl>
+      <ul className="mt-3 list-disc space-y-1 pl-4 text-xs leading-5 text-muted-foreground">
+        {impact.details.map((detail) => (
+          <li key={detail}>{detail}</li>
+        ))}
+      </ul>
+      <div className="mt-4 flex justify-end gap-2">
+        <Button
+          ref={cancelRef}
+          variant="outline"
+          size="sm"
+          onClick={onCancel}
+          disabled={busy}
+        >
+          Cancel
+        </Button>
+        <Button
+          variant="destructive"
+          size="sm"
+          onClick={onConfirm}
+          disabled={busy}
+        >
+          {pendingAction.action === "reset"
+            ? "Confirm rebuild"
+            : "Confirm delete"}
+        </Button>
+      </div>
+    </AccessibleModal>
   )
 }

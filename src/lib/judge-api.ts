@@ -1,4 +1,6 @@
 import { isTauri, trackedInvoke } from "@/lib/tauri"
+import { open } from "@tauri-apps/plugin-dialog"
+import { MAX_BACKUP_BYTES } from "@/lib/backup-errors"
 
 export type JudgeVerdict =
   | "Accepted"
@@ -11,8 +13,27 @@ export type JudgeVerdict =
   | "Cancelled"
   | "JudgeError"
 
+export type ProblemDifficulty = "easy" | "medium" | "hard"
+export type ProblemDialect = "postgresql" | "sqlserver"
+
+export type CatalogColumn = {
+  name: string
+  type: string
+  nullable: boolean
+}
+
+export type CatalogTable = {
+  name: string
+  columns: CatalogColumn[]
+}
+
+export type CatalogSampleValue = string | number | boolean | null
+
 export type JudgeRunRequest = {
   problemId: string
+  packId: string
+  packVersion: string
+  packDigest: string
   sql: string
   mode: "run" | "submit"
   requestId?: string
@@ -22,7 +43,7 @@ export type JudgeRunResult = {
   status: "completed" | "unavailable" | "error"
   verdict?: JudgeVerdict
   columns?: Array<{ name: string; type: string }>
-  rows?: Array<Array<string | number | null>>
+  rows?: Array<Array<string | number | boolean | null>>
   durationMs: number
   message: string
 }
@@ -31,6 +52,8 @@ export type ManagedEnvironmentSummary = {
   envId: string
   instanceId: string
   packId: string
+  packVersion: string
+  packDigest: string
   namespace: string
   mode: "managed" | "external_explorer"
   state:
@@ -49,10 +72,88 @@ export type ManagedRuntimeStatus = {
   message: string
 }
 
+export type ConnectionProfileSummary = {
+  profileId: string
+  displayName: string
+  engine: "postgresql" | "sqlserver"
+  host: string
+  port: number
+  database: string
+  username: string
+  tlsMode: "require" | "verify_ca" | "verify_full"
+  hasSecret: boolean
+}
+
+export type SaveConnectionProfileRequest = Omit<
+  ConnectionProfileSummary,
+  "hasSecret"
+> & {
+  secret?: string
+}
+
+export type ExternalConnectionInfo = {
+  database: string
+  username: string
+  serverVersion: string
+  readOnly: boolean
+}
+
+export type ExternalMetadata = {
+  tables: Array<{
+    schema: string
+    name: string
+    kind: string
+    columns: Array<{ name: string; dataType: string }>
+  }>
+  truncated: boolean
+}
+
+export type ExternalSelectRequest = {
+  profileId: string
+  sql: string
+  statementTimeoutMs: number
+  maxRows: number
+  maxBytes: number
+}
+
+export type ExternalQueryResult = {
+  columns: Array<{ name: string; type: string }>
+  rows: Array<Array<string | number | boolean | null>>
+}
+
 export type CreateManagedEnvironmentRequest = {
   envId: string
   packId: string
+  packVersion: string
+  packDigest: string
   namespace: string
+}
+
+export type ManagedPackSummary = {
+  packId: string
+  version: string
+  digest: string
+}
+
+export type InstalledProblem = {
+  id: string
+  title: string
+  difficulty: ProblemDifficulty
+  dialect: ProblemDialect
+  topics: string[]
+  statement: string
+  schema: CatalogTable[]
+  sampleRows: Array<Record<string, CatalogSampleValue>>
+  starterSql: string | null
+}
+
+export type InstalledPack = {
+  packId: string
+  version: string
+  title: string
+  dialect: ProblemDialect
+  digest: string
+  problems: InstalledProblem[]
 }
 
 export type CloneManagedEnvironmentRequest = {
@@ -83,6 +184,44 @@ export type SubmissionHistorySummary = {
   policyVersion: string
   verdict: string
   createdAt: string
+}
+
+export type PackImportResult = {
+  status: "published" | "already_installed"
+  packId: string
+  version: string
+  digest: string
+  message: string
+}
+
+export type BackupSnapshot = {
+  version: 2
+  environments: Array<{
+    envId: string
+    instanceId: string
+    packId: string
+    packVersion: string
+    packDigest: string
+    namespace: string
+    ownershipNonce: string
+    mode: string
+    state: string
+  }>
+  submissions: Array<{
+    submissionId: string
+    packId: string
+    packVersion: string
+    packHash: string
+    engineVersion: string
+    policyVersion: string
+    verdict: string
+    createdAt: string
+    tests: Array<{
+      testId: string
+      verdict: string
+      elapsedMs: number
+    }>
+  }>
 }
 
 export async function runJudge(
@@ -209,6 +348,80 @@ export async function listSubmissionHistory(): Promise<
   return trackedInvoke<SubmissionHistorySummary[]>("list_submission_history")
 }
 
+export async function importPack(path: string): Promise<PackImportResult> {
+  if (!isTauri()) {
+    throw new Error("Pack import is only available in the desktop app.")
+  }
+
+  return trackedInvoke<PackImportResult>("import_pack", { path })
+}
+
+export async function inspectManagedPack(
+  packId: string
+): Promise<ManagedPackSummary | null> {
+  if (!isTauri()) {
+    return null
+  }
+  return trackedInvoke<ManagedPackSummary | null>("inspect_managed_pack", {
+    packId,
+  })
+}
+
+export async function listInstalledPacks(): Promise<InstalledPack[]> {
+  if (!isTauri()) {
+    return []
+  }
+  return trackedInvoke<InstalledPack[]>("list_installed_packs")
+}
+
+export async function pickPackSource(
+  kind: "archive" | "directory"
+): Promise<string | null> {
+  if (!isTauri()) {
+    throw new Error("Pack selection is only available in the desktop app.")
+  }
+
+  const selected = await open(
+    kind === "directory"
+      ? { directory: true, multiple: false }
+      : {
+          directory: false,
+          multiple: false,
+          filters: [
+            { name: "SQL Judge pack", extensions: ["sqljudge.zip", "zip"] },
+          ],
+        }
+  )
+  return typeof selected === "string" ? selected : null
+}
+
+export async function exportBackup(): Promise<BackupSnapshot> {
+  if (!isTauri()) {
+    throw new Error("Metadata backup is only available in the desktop app.")
+  }
+
+  return trackedInvoke<BackupSnapshot>("export_backup")
+}
+
+export function serializeBackupSnapshot(snapshot: BackupSnapshot): string {
+  const serialized = JSON.stringify(snapshot)
+  const byteLength = new TextEncoder().encode(serialized).byteLength
+  if (byteLength > MAX_BACKUP_BYTES) {
+    throw new Error("Metadata backup exceeds the supported size limit.")
+  }
+  return serialized
+}
+
+export async function restoreBackup(snapshot: BackupSnapshot): Promise<void> {
+  if (!isTauri()) {
+    throw new Error("Metadata restore is only available in the desktop app.")
+  }
+
+  await trackedInvoke<void>("restore_backup", {
+    snapshotJson: serializeBackupSnapshot(snapshot),
+  })
+}
+
 export async function getManagedRuntimeStatus(): Promise<ManagedRuntimeStatus> {
   if (!isTauri()) {
     return {
@@ -233,4 +446,124 @@ export async function startManagedRuntime(): Promise<ManagedRuntimeStatus> {
   }
 
   return trackedInvoke<ManagedRuntimeStatus>("start_managed_runtime")
+}
+
+export async function listConnectionProfiles(): Promise<
+  ConnectionProfileSummary[]
+> {
+  if (!isTauri()) {
+    return []
+  }
+
+  return trackedInvoke<ConnectionProfileSummary[]>("list_connection_profiles")
+}
+
+export async function saveConnectionProfile(
+  request: SaveConnectionProfileRequest
+): Promise<ConnectionProfileSummary> {
+  if (!isTauri()) {
+    throw new Error(
+      "Connection profiles are only available in the desktop app."
+    )
+  }
+
+  return trackedInvoke<ConnectionProfileSummary>(
+    "save_connection_profile",
+    request
+  )
+}
+
+export async function deleteConnectionProfile(
+  profileId: string
+): Promise<void> {
+  if (!isTauri()) {
+    throw new Error(
+      "Connection profiles are only available in the desktop app."
+    )
+  }
+
+  await trackedInvoke<void>("delete_connection_profile", { profileId })
+}
+
+export async function testExternalConnection(
+  profileId: string
+): Promise<ExternalConnectionInfo> {
+  if (!isTauri()) {
+    throw new Error(
+      "External connections are only available in the desktop app."
+    )
+  }
+
+  return trackedInvoke<ExternalConnectionInfo>("test_external_connection", {
+    profileId,
+  })
+}
+
+export async function listExternalMetadata(
+  profileId: string
+): Promise<ExternalMetadata> {
+  if (!isTauri()) {
+    throw new Error(
+      "External connections are only available in the desktop app."
+    )
+  }
+
+  return trackedInvoke<ExternalMetadata>("list_external_metadata", {
+    profileId,
+  })
+}
+
+export async function executeExternalSelect(
+  request: ExternalSelectRequest
+): Promise<ExternalQueryResult> {
+  if (!isTauri()) {
+    throw new Error(
+      "External connections are only available in the desktop app."
+    )
+  }
+
+  return trackedInvoke<ExternalQueryResult>("execute_external_select", request)
+}
+
+export async function testExternalSqlServer(
+  profileId: string
+): Promise<ExternalConnectionInfo> {
+  if (!isTauri()) {
+    throw new Error(
+      "External connections are only available in the desktop app."
+    )
+  }
+
+  return trackedInvoke<ExternalConnectionInfo>("test_external_sqlserver", {
+    profileId,
+  })
+}
+
+export async function listExternalSqlServerMetadata(
+  profileId: string
+): Promise<ExternalMetadata> {
+  if (!isTauri()) {
+    throw new Error(
+      "External connections are only available in the desktop app."
+    )
+  }
+
+  return trackedInvoke<ExternalMetadata>("list_external_sqlserver_metadata", {
+    profileId,
+  })
+}
+
+export async function executeExternalSqlServerSelect(
+  request: ExternalSelectRequest
+): Promise<ExternalQueryResult> {
+  if (!isTauri()) {
+    throw new Error(
+      "External connections are only available in the desktop app."
+    )
+  }
+
+  return trackedInvoke<ExternalQueryResult>(
+    "execute_external_sqlserver_select",
+    request
+  )
 }

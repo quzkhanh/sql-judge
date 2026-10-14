@@ -15,6 +15,7 @@ import {
   type SubmissionHistorySummary,
 } from "@/lib/judge-api"
 import { cn } from "@/lib/utils"
+import { BackupActions } from "./backup-actions"
 
 export function HistoryScreen() {
   const [records, setRecords] = useState<SubmissionHistorySummary[]>([])
@@ -23,6 +24,7 @@ export function HistoryScreen() {
 
   async function refresh() {
     setBusy(true)
+    setRecords([])
     try {
       setRecords(await listSubmissionHistory())
       setMessage(null)
@@ -44,6 +46,7 @@ export function HistoryScreen() {
       })
       .catch(() => {
         if (active) {
+          setRecords([])
           setMessage("Submission history could not be loaded.")
         }
       })
@@ -65,15 +68,24 @@ export function HistoryScreen() {
             <p className="text-xs font-semibold tracking-[0.18em] text-primary uppercase">
               Audit trail
             </p>
-            <h2 className="mt-1 text-2xl font-semibold tracking-tight">History</h2>
+            <h2 className="mt-1 text-2xl font-semibold tracking-tight">
+              History
+            </h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Review local submission outcomes and immutable pack metadata.
             </p>
           </div>
-          <Button variant="outline" onClick={() => void refresh()} disabled={busy}>
-            <RefreshCw className={cn(busy && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex flex-wrap justify-end gap-2">
+            <BackupActions onRestored={() => void refresh()} />
+            <Button
+              variant="outline"
+              onClick={() => void refresh()}
+              disabled={busy}
+            >
+              <RefreshCw className={cn(busy && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
         </header>
 
         <Card>
@@ -82,11 +94,35 @@ export function HistoryScreen() {
               <History className="size-4" /> Submissions
             </CardTitle>
             <CardDescription>
-              Passwords, connection strings, and raw SQL are never stored in this history.
+              Passwords, connection strings, and raw SQL are never stored in
+              this history.
             </CardDescription>
           </CardHeader>
           <CardContent>
-            {records.length > 0 ? (
+            {busy ? (
+              <p
+                className="rounded-lg border border-dashed p-12 text-center text-sm text-muted-foreground"
+                role="status"
+              >
+                Loading submission history...
+              </p>
+            ) : message ? (
+              <div
+                className="rounded-lg border border-destructive/30 bg-destructive/5 p-8 text-center"
+                role="alert"
+              >
+                <p className="text-sm text-destructive">{message}</p>
+                <Button
+                  className="mt-3"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void refresh()}
+                >
+                  <RefreshCw />
+                  Retry
+                </Button>
+              </div>
+            ) : records.length > 0 ? (
               <div className="overflow-x-auto rounded-lg border">
                 <table className="w-full text-left text-sm">
                   <thead className="bg-muted/40 text-xs text-muted-foreground">
@@ -111,7 +147,13 @@ export function HistoryScreen() {
                           </p>
                         </td>
                         <td className="px-4 py-3">
-                          <Badge variant={record.verdict === "Accepted" ? "default" : "outline"}>
+                          <Badge
+                            variant={
+                              record.verdict === "Accepted"
+                                ? "default"
+                                : "outline"
+                            }
+                          >
                             {record.verdict}
                           </Badge>
                         </td>
@@ -131,15 +173,11 @@ export function HistoryScreen() {
                 <History className="mx-auto size-8 text-muted-foreground/50" />
                 <p className="mt-3 text-sm font-medium">No submissions yet</p>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Run or submit a solution from Practice to build your local history.
+                  Run or submit a solution from Practice to build your local
+                  history.
                 </p>
               </div>
             )}
-            {message ? (
-              <p className="mt-4 text-sm text-muted-foreground" role="status">
-                {message}
-              </p>
-            ) : null}
           </CardContent>
         </Card>
       </div>

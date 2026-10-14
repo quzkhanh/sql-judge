@@ -8,11 +8,31 @@ fn record(env_id: &str, namespace: &str) -> EnvironmentRecord {
         env_id: env_id.to_owned(),
         instance_id: format!("instance-{env_id}"),
         pack_id: "hr-sql-101".to_owned(),
+        pack_version: "1.0.0".to_owned(),
+        pack_digest: "a".repeat(64),
         namespace: namespace.to_owned(),
         ownership_nonce: format!("nonce-{env_id}"),
         mode: EnvironmentMode::Managed,
         state: EnvironmentState::Ready,
     }
+}
+
+#[test]
+fn managed_record_carries_exact_pack_identity() {
+    let environment = EnvironmentRecord {
+        env_id: "env-pinned".to_owned(),
+        instance_id: "instance-pinned".to_owned(),
+        pack_id: "hr-sql-101".to_owned(),
+        pack_version: "1.0.0".to_owned(),
+        pack_digest: "a".repeat(64),
+        namespace: "sj_pinned".to_owned(),
+        ownership_nonce: "nonce-pinned".to_owned(),
+        mode: EnvironmentMode::Managed,
+        state: EnvironmentState::Ready,
+    };
+
+    assert_eq!(environment.pack_version, "1.0.0");
+    assert_eq!(environment.pack_digest.len(), 64);
 }
 
 fn reset_action(env_id: &str) -> DestructiveAction {

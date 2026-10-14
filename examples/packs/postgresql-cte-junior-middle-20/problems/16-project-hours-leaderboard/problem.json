@@ -1,0 +1,54 @@
+{
+  "id": "16-project-hours-leaderboard",
+  "title": "CTE 16 — Project User Effort Leaderboard",
+  "difficulty": "hard",
+  "topics": ["cte", "dense-rank", "aggregation"],
+  "statement": "Bảng xếp hạng effort cho mỗi (project_id, user_id) có ít nhất một work_log. logged_hours = tổng hours (NULL tính 0); activity_rank = DENSE_RANK giảm dần theo logged_hours TRONG project (bằng điểm cùng hạng, hạng sau liên tiếp). Mỗi dòng = cặp project/user có log. Trả về project_id, user_id, logged_hours, activity_rank. Bắt buộc luyện bằng WITH ... AS (recursive ở bài yêu cầu đệ quy); judge chấm theo output.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "project_id",
+        "type": "integer"
+      },
+      {
+        "name": "user_id",
+        "type": "integer"
+      },
+      {
+        "name": "logged_hours",
+        "type": "numeric"
+      },
+      {
+        "name": "activity_rank",
+        "type": "bigint"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 5000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "edge",
+      "file": "tests/edge.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty",
+      "file": "tests/empty.sql",
+      "hidden": true
+    }
+  ]
+}

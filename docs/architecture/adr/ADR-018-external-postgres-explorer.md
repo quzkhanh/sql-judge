@@ -4,6 +4,7 @@
 - Date: 2026-10-13
 - Requirements: REQ-014, REQ-015
 - Acceptance: AC-014, AC-015
+- Security: SEC-002, SEC-004, SEC-005, SEC-007
 
 ## Context
 

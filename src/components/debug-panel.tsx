@@ -48,6 +48,7 @@ import {
   type LogDebugEvent,
   type RuntimeEventDebugEvent,
   emitDebugEvent,
+  forwardConsoleArguments,
   redactUrl,
   serializeDebugValue,
   serializeError,
@@ -598,10 +599,28 @@ function EntryHighlight() {
 
 export function DebugPanel() {
   const [open, setOpen] = React.useState(false)
-  const [panelSide, setPanelSide] = React.useState<DebugPanelSide>("right")
-  const [activeTab, setActiveTab] = React.useState<DebugPanelTab>("overview")
-  const [attached, setAttached] = React.useState(false)
-  const [tauriReady, setTauriReady] = React.useState(false)
+  const [panelSide, setPanelSide] = React.useState<DebugPanelSide>(() => {
+    if (typeof window === "undefined") {
+      return "right"
+    }
+
+    const savedSide = window.sessionStorage.getItem(DEBUG_PANEL_SIDE_KEY)
+    return savedSide && isDebugPanelSide(savedSide) ? savedSide : "right"
+  })
+  const [activeTab, setActiveTab] = React.useState<DebugPanelTab>(() => {
+    if (typeof window === "undefined") {
+      return "overview"
+    }
+
+    const savedTab = window.sessionStorage.getItem(DEBUG_PANEL_TAB_KEY)
+    return savedTab && isDebugPanelTab(savedTab) ? savedTab : "overview"
+  })
+  const [attached, setAttached] = React.useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.sessionStorage.getItem(DEBUG_PANEL_ATTACH_KEY) === "true"
+  )
+  const [tauriReady] = React.useState(() => isTauri())
   const [appInfo, setAppInfo] = React.useState<AppDiagnostics>({
     name: null,
     version: null,
@@ -709,37 +728,11 @@ export function DebugPanel() {
   const highlightTimeoutsRef = React.useRef<number[]>([])
 
   React.useEffect(() => {
-    setTauriReady(isTauri())
-  }, [])
-
-  React.useEffect(() => {
     return () => {
       for (const timeoutId of highlightTimeoutsRef.current) {
         window.clearTimeout(timeoutId)
       }
     }
-  }, [])
-
-  React.useEffect(() => {
-    if (typeof window === "undefined") {
-      return
-    }
-
-    const savedSide = window.sessionStorage.getItem(DEBUG_PANEL_SIDE_KEY)
-
-    if (savedSide && isDebugPanelSide(savedSide)) {
-      setPanelSide(savedSide)
-    }
-
-    const savedTab = window.sessionStorage.getItem(DEBUG_PANEL_TAB_KEY)
-
-    if (savedTab && isDebugPanelTab(savedTab)) {
-      setActiveTab(savedTab)
-    }
-
-    setAttached(
-      window.sessionStorage.getItem(DEBUG_PANEL_ATTACH_KEY) === "true"
-    )
   }, [])
 
   React.useEffect(() => {
@@ -854,7 +847,7 @@ export function DebugPanel() {
     function refreshSystemDefaults() {
       const resolved = new Intl.DateTimeFormat().resolvedOptions()
       const localeChain = getLocaleChain()
-      let region: string | null = null
+      let region: string | null
 
       try {
         region = new Intl.Locale(resolved.locale).region ?? null
@@ -1219,7 +1212,9 @@ export function DebugPanel() {
           id: crypto.randomUUID(),
           timestamp: new Date().toISOString(),
           source: "error",
-          message: event.message || "Unknown runtime error",
+          message: serializeError(
+            event.error ?? event.message ?? "Unknown runtime error"
+          ).message,
         })
       )
     }
@@ -1287,7 +1282,7 @@ export function DebugPanel() {
         timestamp: new Date().toISOString(),
       })
 
-      originalMethod(...args)
+      forwardConsoleArguments(originalMethod, args)
     }
 
     window.console.log = (...args: unknown[]) => {

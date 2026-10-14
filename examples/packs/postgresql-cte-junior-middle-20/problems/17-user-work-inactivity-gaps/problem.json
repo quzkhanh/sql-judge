@@ -1,0 +1,54 @@
+{
+  "id": "17-user-work-inactivity-gaps",
+  "title": "CTE 17 — Detect Inactivity Gaps Over 7 Days",
+  "difficulty": "hard",
+  "topics": ["cte", "lag", "gaps-and-islands", "date"],
+  "statement": "Tìm các lần user quay lại ghi work_log sau khi đã NGỪNG log trên 7 ngày so với NGÀY LOG TRƯỚC ĐÓ của chính user. Nhiều work_logs cùng ngày chỉ là 1 ngày hoạt động; khoảng cách đúng 7 ngày KHÔNG lấy. Tính gap_days bằng phép trừ date trong PostgreSQL. Mỗi dòng = một lần comeback. Trả về user_id, logged_on, previous_logged_on, gap_days. Bắt buộc luyện bằng WITH ... AS (recursive ở bài yêu cầu đệ quy); judge chấm theo output.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "user_id",
+        "type": "integer"
+      },
+      {
+        "name": "logged_on",
+        "type": "date"
+      },
+      {
+        "name": "previous_logged_on",
+        "type": "date"
+      },
+      {
+        "name": "gap_days",
+        "type": "integer"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 5000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "edge",
+      "file": "tests/edge.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty",
+      "file": "tests/empty.sql",
+      "hidden": true
+    }
+  ]
+}
