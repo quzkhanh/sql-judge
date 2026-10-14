@@ -15,6 +15,15 @@ describe("readPackImportError", () => {
     ).toBe("Pack source could not be loaded.")
   })
 
+  test("explains the local PostgreSQL prerequisite", () => {
+    expect(
+      readPackImportError("Managed PostgreSQL runtime could not be started.")
+    ).toContain("initdb")
+    expect(
+      readPackImportError("Managed PostgreSQL runtime could not be started.")
+    ).toContain("pg_ctl")
+  })
+
   test("does not expose unknown native error details", () => {
     expect(readPackImportError("/tmp/secret.sql: password=secret")).toBe(
       "Pack import failed closed. No unvalidated pack was published."
