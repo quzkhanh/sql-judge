@@ -16,11 +16,18 @@
 8. `docs/security/THREAT-MODEL.md` — trust boundaries and forbidden actions.
 9. `docs/testing/TDD-RULES.md` — Red/Green/Refactor and verification requirements.
 10. `docs/ui/UI-SPEC.md` — use the actual tauri-ui starter, UX and accessibility.
-11. `docs/agents/AI-PACK-GENERATION.md` — RULE for agents that author SQL packs.
-12. `docs/agents/WORKFLOW.md` — task assignment, commits, evidence and handoffs.
-13. `tasks/plan.md` + `tasks/todo.md` — dependency-ordered implementation work.
-14. `docs/operations/BUILD-RELEASE.md` + `docs/operations/RUNBOOK.md` — build and runtime.
-15. `schemas/` and `examples/packs/` — machine-readable v1 contract and reference fixture.
+11. `docs/design/` — approved application design exports. `docs/design/SQL Judge — UI redesign.html` is the application-wide reference; per-screen artboards such as `docs/design/Home/Main.dc.html` provide exact layout and visual values.
+12. `docs/agents/AI-PACK-GENERATION.md` — RULE for agents that author SQL packs.
+13. `docs/agents/WORKFLOW.md` — task assignment, commits, evidence and handoffs.
+14. `tasks/plan.md` + `tasks/todo.md` — dependency-ordered implementation work.
+15. `docs/operations/BUILD-RELEASE.md` + `docs/operations/RUNBOOK.md` — build and runtime.
+16. `schemas/` and `examples/packs/` — machine-readable v1 contract and reference fixture.
+
+## UI design fidelity
+
+When changing frontend UI, treat the matching export under `docs/design/` as a binding visual reference, not inspiration. Recreate its documented dimensions, spacing, colors, typography, radii, borders, shadows, states, and responsive behavior through the existing component system. Do not copy exported runtime markup or vendor assets into production.
+
+If the reference and existing component defaults differ, use the reference values in a scoped component or deliberately update the shared primitive after checking its callers. Do not substitute arbitrary values or claim pixel fidelity without inspecting the relevant reference and validating the rendered screen.
 
 ## How to merge into an already generated scaffold
 

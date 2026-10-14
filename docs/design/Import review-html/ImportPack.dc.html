@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SQL Judge — Review pack before installing</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sj{--bg:#ffffff;--fg:#0a0a0c;--card:#ffffff;--sidebar:#fafafa;--muted:#f4f4f5;--muted-fg:#67676f;--border:#e8e8eb;--input:#dedee3;--primary:#18181b;--primary-fg:#fafafa;--hover:#f2f2f4;--ring:#2563eb;--ok:#047857;--ok-bg:#ecfdf3;--warn:#a15c07;--warn-bg:#fff8e6;--shadow:0 1px 2px rgba(16,16,24,.05)}
+.sj.dark{--bg:#0a0a0c;--fg:#f4f4f5;--card:#111114;--sidebar:#0e0e11;--muted:#1b1b1f;--muted-fg:#a1a1aa;--border:#25252a;--input:#2f2f35;--primary:#f4f4f5;--primary-fg:#111114;--hover:#1b1b1f;--ring:#60a5fa;--ok:#4ade80;--ok-bg:#0f2a1c;--warn:#fbbf24;--warn-bg:#2c2109;--shadow:0 1px 2px rgba(0,0,0,.5)}
+.sj *{box-sizing:border-box}
+.sj h1,.sj h2,.sj h3,.sj p{margin:0}
+.sj a{color:inherit;text-decoration:none}
+.sj a:hover{color:inherit}
+.sj :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--fg);font-family:inherit;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer}
+.btn-primary{background:var(--primary);color:var(--primary-fg)}
+.sj .btn-primary:hover{opacity:.88;color:var(--primary-fg)}
+.btn-outline{background:var(--card);border-color:var(--border);box-shadow:var(--shadow)}
+.btn-outline:hover,.btn-ghost:hover{background:var(--hover)}
+.btn-sm{height:32px;padding:0 10px;font-size:13px;gap:6px}
+.btn-icon{width:36px;padding:0}
+.btn-sm.btn-icon{width:32px;padding:0}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--fg);font-size:12px;font-weight:500;white-space:nowrap}
+.input{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--input);background:var(--card);color:var(--fg);font-family:inherit;font-size:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:8px;font-size:14px;color:var(--fg)}
+.nav:hover{background:var(--hover)}
+.nav .i{color:var(--muted-fg)}
+.nav.on{background:var(--hover);font-weight:500}
+.nav.on .i{color:var(--fg)}
+.grp{padding:0 10px 4px;font-size:12px;font-weight:500;color:var(--muted-fg)}
+.kbd{display:inline-flex;align-items:center;height:20px;padding:0 5px;border:1px solid var(--border);border-radius:5px;background:var(--card);font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;color:var(--muted-fg)}
+.mono{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:var(--muted-fg)}
+.step{display:flex;align-items:center;gap:10px;font-size:14px}
+.step .num{width:26px;height:26px;border-radius:999px;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0}
+.chk{display:flex;gap:14px;padding:14px 20px;border-top:1px solid var(--border)}
+.chk .ic{width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.chk .ic .i{width:13px;height:13px;stroke-width:2.5}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:16px}
+.kv div{display:flex;flex-direction:column;gap:2px}
+.kv dt{font-size:12.5px;color:var(--muted-fg)}
+.kv dd{margin:0;font-weight:500}
+.cbx{width:18px;height:18px;border-radius:5px;background:var(--primary);color:var(--primary-fg);display:flex;align-items:center;justify-content:center;flex-shrink:0;border:0;padding:0;cursor:pointer}
+</style>
+</helmet>
+<div class="sj {{theme}}" style="min-height: 100vh; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--fg); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.5">
+
+  <aside aria-label="Main navigation" style="flex: 1 1 248px; display: flex; flex-direction: column; gap: 20px; padding: 14px 12px; background: var(--sidebar); border-right: 1px solid var(--border)">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 2px 6px">
+      <div class="mono" style="width: 30px; height: 30px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500">SJ</div>
+      <div style="display: flex; flex-direction: column; line-height: 1.25">
+        <span style="font-weight: 600">SQL Judge</span>
+        <span class="muted" style="font-size: 12px">Local workspace</span>
+      </div>
+    </div>
+    <button class="input" style="justify-content: space-between; height: 34px; cursor: pointer; color: var(--muted-fg)">
+      <span style="display: flex; align-items: center; gap: 8px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Search</span>
+      <span class="kbd">Ctrl K</span>
+    </button>
+    <nav style="display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Learn</div>
+        <a class="nav" href="Main.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg>Home</a>
+        <a class="nav" href="Problems.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>Problems</a>
+        <a class="nav" href="History.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>History</a>
+        <a class="nav" href="Progress.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg>Progress</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Library</div>
+        <a class="nav on" href="Packs.dc.html" aria-current="page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path><path d="m3.3 7 8.7 5 8.7-5"></path><path d="M12 22V12"></path></svg>Packs</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Data</div>
+        <a class="nav" href="Environments.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>Environments</a>
+        <a class="nav" href="Connections.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg>Connections</a>
+        <a class="nav" href="Explorer.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path><path d="M12 3v18"></path></svg>Explorer</a>
+      </div>
+    </nav>
+    <div style="flex: 1"></div>
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <a class="nav" href="Environments.dc.html" style="height: auto; padding: 8px 10px; align-items: flex-start">
+        <span style="width: 8px; height: 8px; border-radius: 999px; background: #16a34a; margin-top: 7px; flex-shrink: 0"></span>
+        <span style="display: flex; flex-direction: column; line-height: 1.35"><span style="font-size: 13px; font-weight: 500">Runtime ready</span><span class="muted" style="font-size: 12px">PostgreSQL 16.4 · local socket</span></span>
+      </a>
+      <a class="nav" href="Settings.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg>Settings</a>
+    </div>
+  </aside>
+
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--border)">
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Toggle sidebar"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg></button>
+      <div style="width: 1px; height: 16px; background: var(--border)"></div>
+      <nav aria-label="Breadcrumb" style="display: flex; align-items: center; gap: 6px">
+        <a class="muted" href="Packs.dc.html">Packs</a>
+        <svg class="i muted" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="m9 18 6-6-6-6"></path></svg>
+        <span style="font-weight: 500" aria-current="page">Import</span>
+      </nav>
+      <div style="flex: 1"></div>
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Switch theme"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg></button>
+    </header>
+
+    <main style="flex: 1; padding: 32px 40px 48px">
+      <div style="max-width: 820px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+
+        <ol aria-label="Import steps" style="list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+          <li class="step"><span class="num" style="background: var(--ok-bg); color: var(--ok)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px; stroke-width: 2.5"><path d="M20 6 9 17l-5-5"></path></svg></span><span class="muted">Choose file</span></li>
+          <li aria-hidden="true" style="width: 40px; height: 1px; background: var(--border)"></li>
+          <li class="step" aria-current="step"><span class="num" style="background: var(--primary); color: var(--primary-fg)">2</span><span style="font-weight: 500">Review</span></li>
+          <li aria-hidden="true" style="width: 40px; height: 1px; background: var(--border)"></li>
+          <li class="step"><span class="num" style="border: 1px solid var(--input); color: var(--muted-fg)">3</span><span class="muted">Install</span></li>
+        </ol>
+
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <h1 style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2">Window Functions Drills is ready to install</h1>
+          <p class="muted" style="font-size: 15px">Everything checked out in a throwaway database. Nothing has been installed yet — cancel and the temporary database is removed.</p>
+        </div>
+
+        <section class="card" aria-labelledby="sum-h" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 18px">
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px">
+            <div style="width: 38px; height: 38px; border-radius: 9px; background: var(--muted); display: flex; align-items: center; justify-content: center"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path><path d="m3.3 7 8.7 5 8.7-5"></path><path d="M12 22V12"></path></svg></div>
+            <div style="flex: 1; display: flex; flex-direction: column">
+              <h2 id="sum-h" style="font-size: 15px; font-weight: 600">window-functions-drills.sqljudge.zip</h2>
+              <span class="muted" style="font-size: 13px">184 KB · 31 files · chosen from Downloads</span>
+            </div>
+            <a class="btn btn-ghost btn-sm" href="Packs.dc.html">Choose another</a>
+          </div>
+          <dl class="kv" style="margin: 0; padding-top: 16px; border-top: 1px solid var(--border)">
+            <div><dt>Version</dt><dd class="mono">1.0.0</dd></div>
+            <div><dt>Dialect</dt><dd>PostgreSQL 16</dd></div>
+            <div><dt>Problems</dt><dd>12 · 48 fixtures</dd></div>
+            <div><dt>Content hash</dt><dd class="mono" style="font-size: 13px">sha256:c71a…2e04</dd></div>
+          </dl>
+        </section>
+
+        <section class="card" aria-labelledby="checks-h" style="overflow: hidden">
+          <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 16px 20px">
+            <h2 id="checks-h" style="font-size: 15px; font-weight: 600">Validation report</h2>
+            <span class="muted" style="font-size: 13px">5 passed · 1 note</span>
+          </div>
+          <div class="chk"><span class="ic" style="background: var(--ok-bg); color: var(--ok)"><svg class="i" viewBox="0 0 24 24" role="img" aria-label="Passed"><path d="M20 6 9 17l-5-5"></path></svg></span><div><div style="font-weight: 500">Archive structure</div><div class="muted" style="font-size: 13px">No paths outside the pack, no symlinks, no duplicate entries. Unpacked size 412 KB.</div></div></div>
+          <div class="chk"><span class="ic" style="background: var(--ok-bg); color: var(--ok)"><svg class="i" viewBox="0 0 24 24" role="img" aria-label="Passed"><path d="M20 6 9 17l-5-5"></path></svg></span><div><div style="font-weight: 500">Manifest</div><div class="muted" style="font-size: 13px"><span class="mono">pack.json</span> matches schema v1.0 with no unknown fields.</div></div></div>
+          <div class="chk"><span class="ic" style="background: var(--ok-bg); color: var(--ok)"><svg class="i" viewBox="0 0 24 24" role="img" aria-label="Passed"><path d="M20 6 9 17l-5-5"></path></svg></span><div><div style="font-weight: 500">Schema setup</div><div class="muted" style="font-size: 13px">Created 4 tables in a disposable database in 1.2 s.</div></div></div>
+          <div class="chk"><span class="ic" style="background: var(--ok-bg); color: var(--ok)"><svg class="i" viewBox="0 0 24 24" role="img" aria-label="Passed"><path d="M20 6 9 17l-5-5"></path></svg></span><div><div style="font-weight: 500">Reference queries</div><div class="muted" style="font-size: 13px">12 of 12 ran on every fixture and returned the declared column types.</div></div></div>
+          <div class="chk"><span class="ic" style="background: var(--ok-bg); color: var(--ok)"><svg class="i" viewBox="0 0 24 24" role="img" aria-label="Passed"><path d="M20 6 9 17l-5-5"></path></svg></span><div><div style="font-weight: 500">Limits</div><div class="muted" style="font-size: 13px">Every query finished under 2 s and well under 10,000 rows.</div></div></div>
+          <div class="chk" style="background: var(--warn-bg)"><span class="ic" style="background: var(--card); color: var(--warn)"><svg class="i" viewBox="0 0 24 24" role="img" aria-label="Note"><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg></span><div style="flex: 1"><div style="font-weight: 500">One thing worth knowing</div><div class="muted" style="font-size: 13px">In <span class="mono">wf-07 Rolling 7-day average</span>, fixtures 2 and 3 expect identical output, so they may not catch different mistakes. You can still install.</div></div></div>
+        </section>
+
+        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px; padding-top: 4px">
+          <label style="display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer">
+            <button class="cbx" role="checkbox" aria-checked="true" aria-label="Create a practice environment after install"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 12px; height: 12px; stroke-width: 3"><path d="M20 6 9 17l-5-5"></path></svg></button>
+            <span>Create a practice environment after install <span class="muted mono" style="font-size: 13px">sj_window_practice</span></span>
+          </label>
+          <div style="display: flex; gap: 8px">
+            <a class="btn btn-ghost" href="Packs.dc.html">Cancel</a>
+            <a class="btn btn-primary" href="Packs.dc.html">Install pack</a>
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":980}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: (this.props.dark ?? false) ? 'dark' : 'light' };
+  }
+}
+</script>
+</body>
+</html>

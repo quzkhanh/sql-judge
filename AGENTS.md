@@ -13,7 +13,8 @@ These rules apply to ALL AI agents, including subagents, code reviewers, PR agen
 2. `docs/architecture/ARCHITECTURE.md`; for changes crossing boundaries, read ADRs.
 3. Feature contract under `docs/contracts/` and `docs/security/THREAT-MODEL.md`.
 4. `docs/testing/TDD-RULES.md` and current task in `tasks/todo.md`.
-5. Exact code and dependency versions in current checkout. Consult current upstream official docs for framework APIs.
+5. For frontend changes, `docs/design/SQL Judge — UI redesign.html` plus the matching screen export under `docs/design/` (for example `docs/design/Home/Main.dc.html`).
+6. Exact code and dependency versions in current checkout. Consult current upstream official docs for framework APIs.
 
 If docs conflict: explicit current user instruction > accepted PRD/AC > contracts > ADRs > tasks > examples. Identify conflict and update the appropriate contract **before** changing implementation.
 
@@ -53,6 +54,13 @@ If docs conflict: explicit current user instruction > accepted PRD/AC > contract
 - New dependency / workflow / migration / capability changes require a short decision record and review; do not pin arbitrary versions from memory.
 - No rewrite of generated `release.yml` or claimed successful six-platform packaging until actual matrix builds were run with PostgreSQL runtime included or explicitly documented as external prerequisite.
 - Never quietly lower thresholds to get green. Never claim test/build success without command output.
+
+## UI design fidelity
+- Design exports in `docs/design/` are mandatory visual contracts for frontend work. Inspect the application-wide export and the target screen artboard before editing UI.
+- Treat exact exported colors, dimensions, spacing, typography, radii, borders, shadows, interaction states and responsive rules as requirements. Match them through the existing component system; do not use defaults or improvised values when the export specifies a value.
+- Exported HTML and vendor scripts are reference material only. Reimplement with repository React components and styles; never ship copied design-export runtime markup or scripts.
+- When a shared primitive needs a different design value, inspect all callers and update it deliberately. Otherwise scope the override to the target screen.
+- Validate the rendered screen against the reference before claiming visual fidelity. If a reference is incomplete or conflicts with accessibility/security requirements, stop and ask for direction.
 
 ## Agent handoff format
 `Task ID | Files changed | Requirements | Tests (command, result) | Security assumptions | Known limitations | Next safe task`.

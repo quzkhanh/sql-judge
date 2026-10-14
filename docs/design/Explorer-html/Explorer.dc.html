@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SQL Judge — Explorer</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sj{--bg:#ffffff;--fg:#0a0a0c;--card:#ffffff;--sidebar:#fafafa;--muted:#f4f4f5;--muted-fg:#67676f;--border:#e8e8eb;--input:#dedee3;--primary:#18181b;--primary-fg:#fafafa;--hover:#f2f2f4;--ring:#2563eb;--ok:#047857;--ok-bg:#ecfdf3;--kw:#7c3aed;--num:#b45309;--str:#047857;--fn:#2563eb;--gutter:#a1a1aa;--shadow:0 1px 2px rgba(16,16,24,.05)}
+.sj.dark{--bg:#0a0a0c;--fg:#f4f4f5;--card:#111114;--sidebar:#0e0e11;--muted:#1b1b1f;--muted-fg:#a1a1aa;--border:#25252a;--input:#2f2f35;--primary:#f4f4f5;--primary-fg:#111114;--hover:#1b1b1f;--ring:#60a5fa;--ok:#4ade80;--ok-bg:#0f2a1c;--kw:#c4b5fd;--num:#fcd34d;--str:#86efac;--fn:#93c5fd;--gutter:#55555e;--shadow:0 1px 2px rgba(0,0,0,.5)}
+.sj *{box-sizing:border-box}
+.sj h1,.sj h2,.sj h3,.sj p{margin:0}
+.sj a{color:inherit;text-decoration:none}
+.sj a:hover{color:inherit}
+.sj :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--fg);font-family:inherit;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer}
+.btn-primary{background:var(--primary);color:var(--primary-fg)}
+.sj .btn-primary:hover{opacity:.88;color:var(--primary-fg)}
+.btn-outline{background:var(--card);border-color:var(--border);box-shadow:var(--shadow)}
+.btn-outline:hover,.btn-ghost:hover{background:var(--hover)}
+.btn-sm{height:32px;padding:0 10px;font-size:13px;gap:6px}
+.btn-icon{width:36px;padding:0}
+.btn-sm.btn-icon{width:32px;padding:0}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;font-size:12px;font-weight:500;white-space:nowrap}
+.b-ok{background:var(--ok-bg);color:var(--ok)}
+.input{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--input);background:var(--card);color:var(--fg);font-family:inherit;font-size:14px}
+.input input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font:inherit}
+.input input::placeholder{color:var(--muted-fg)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:8px;font-size:14px;color:var(--fg)}
+.nav:hover{background:var(--hover)}
+.nav .i{color:var(--muted-fg)}
+.nav.on{background:var(--hover);font-weight:500}
+.nav.on .i{color:var(--fg)}
+.grp{padding:0 10px 4px;font-size:12px;font-weight:500;color:var(--muted-fg)}
+.kbd{display:inline-flex;align-items:center;height:20px;padding:0 5px;border:1px solid var(--border);border-radius:5px;background:var(--card);font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;color:var(--muted-fg)}
+.mono{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:var(--muted-fg)}
+.tn{display:flex;align-items:center;gap:8px;width:100%;height:30px;padding:0 8px;border:0;border-radius:6px;background:transparent;color:var(--fg);font-family:inherit;font-size:13.5px;text-align:left;cursor:pointer}
+.tn:hover{background:var(--hover)}
+.tn.on{background:var(--hover);font-weight:500}
+.tn .i{width:14px;height:14px;color:var(--muted-fg)}
+.col{display:flex;align-items:center;gap:8px;height:26px;padding-left:44px;padding-right:8px;font-size:12.5px}
+.col .t{margin-left:auto;color:var(--muted-fg);font-family:'Geist Mono',ui-monospace,monospace;font-size:11.5px}
+.code{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;line-height:23px}
+.ln{display:flex}
+.gn{width:44px;padding-right:16px;text-align:right;color:var(--gutter);flex-shrink:0}
+.cl{white-space:pre}
+.k{color:var(--kw)}.n{color:var(--num)}.s{color:var(--str)}.f{color:var(--fn)}
+.grid{border-collapse:collapse;font-size:13px;width:100%}
+.grid th{position:sticky;top:0;background:var(--sidebar);padding:8px 14px;text-align:left;font-weight:500;border-bottom:1px solid var(--border);border-right:1px solid var(--border);white-space:nowrap}
+.grid th small{display:block;font-weight:400;color:var(--muted-fg);font-family:'Geist Mono',ui-monospace,monospace;font-size:11px}
+.grid td{padding:7px 14px;border-bottom:1px solid var(--border);border-right:1px solid var(--border);font-family:'Geist Mono',ui-monospace,monospace;white-space:nowrap}
+.grid td:first-child,.grid th:first-child{color:var(--muted-fg);text-align:right;width:44px;padding:7px 10px}
+.grid tbody tr:hover td{background:var(--hover)}
+</style>
+</helmet>
+<div class="sj {{theme}}" style="min-height: 100vh; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--fg); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.5">
+
+  <aside aria-label="Main navigation" style="flex: 1 1 248px; display: flex; flex-direction: column; gap: 20px; padding: 14px 12px; background: var(--sidebar); border-right: 1px solid var(--border)">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 2px 6px">
+      <div class="mono" style="width: 30px; height: 30px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500">SJ</div>
+      <div style="display: flex; flex-direction: column; line-height: 1.25">
+        <span style="font-weight: 600">SQL Judge</span>
+        <span class="muted" style="font-size: 12px">Local workspace</span>
+      </div>
+    </div>
+    <button class="input" style="justify-content: space-between; height: 34px; cursor: pointer; color: var(--muted-fg)">
+      <span style="display: flex; align-items: center; gap: 8px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Search</span>
+      <span class="kbd">Ctrl K</span>
+    </button>
+    <nav style="display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Learn</div>
+        <a class="nav" href="Main.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg>Home</a>
+        <a class="nav" href="Problems.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>Problems</a>
+        <a class="nav" href="History.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>History</a>
+        <a class="nav" href="Progress.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg>Progress</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Library</div>
+        <a class="nav" href="Packs.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path><path d="m3.3 7 8.7 5 8.7-5"></path><path d="M12 22V12"></path></svg>Packs</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Data</div>
+        <a class="nav" href="Environments.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>Environments</a>
+        <a class="nav" href="Connections.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg>Connections</a>
+        <a class="nav on" href="Explorer.dc.html" aria-current="page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path><path d="M12 3v18"></path></svg>Explorer</a>
+      </div>
+    </nav>
+    <div style="flex: 1"></div>
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <a class="nav" href="Environments.dc.html" style="height: auto; padding: 8px 10px; align-items: flex-start">
+        <span style="width: 8px; height: 8px; border-radius: 999px; background: #16a34a; margin-top: 7px; flex-shrink: 0"></span>
+        <span style="display: flex; flex-direction: column; line-height: 1.35"><span style="font-size: 13px; font-weight: 500">Runtime ready</span><span class="muted" style="font-size: 12px">PostgreSQL 16.4 · local socket</span></span>
+      </a>
+      <a class="nav" href="Settings.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg>Settings</a>
+    </div>
+  </aside>
+
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="min-height: 56px; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 8px 20px; border-bottom: 1px solid var(--border)">
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Toggle sidebar"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg></button>
+      <div style="width: 1px; height: 16px; background: var(--border)"></div>
+      <button class="btn btn-ghost btn-sm" aria-label="Switch connection" style="gap: 10px; padding: 0 8px">
+        <span style="width: 22px; height: 22px; border-radius: 6px; background: #eef3ff; color: #1d4ed8; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600">PG</span>
+        <span style="font-size: 14px">Analytics replica</span>
+        <svg class="i muted" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="m7 15 5 5 5-5"></path><path d="m7 9 5-5 5 5"></path></svg>
+      </button>
+      <span class="badge b-ok"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 12px; height: 12px"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>Read-only</span>
+      <div style="flex: 1"></div>
+      <button class="btn btn-outline btn-sm" title="Run (Ctrl Enter)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 13px; height: 13px"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>Run<span class="muted mono" style="font-size: 11px">Ctrl ↵</span></button>
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Switch theme"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg></button>
+    </header>
+
+    <div style="flex: 1; display: flex; flex-wrap: wrap; min-height: 0">
+
+      <section aria-label="Schema browser" style="flex: 1 1 260px; max-width: 100%; border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 400px">
+        <div style="padding: 12px">
+          <label class="input" style="height: 32px; font-size: 13px">
+            <svg class="i muted" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+            <input type="search" placeholder="Filter tables" aria-label="Filter tables">
+          </label>
+        </div>
+        <div role="tree" aria-label="analytics" style="padding: 0 8px 12px; display: flex; flex-direction: column; gap: 1px; overflow: auto">
+          <button class="tn" role="treeitem" aria-expanded="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>public<span class="muted" style="margin-left: auto; font-size: 12px">6</span></button>
+          <button class="tn on" role="treeitem" aria-expanded="true" style="padding-left: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path></svg>customers</button>
+          <div class="col"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 12px; height: 12px; color: var(--num)"><circle cx="7.5" cy="15.5" r="5.5"></circle><path d="m21 2-9.6 9.6"></path><path d="m15.5 7.5 3 3L22 7l-3-3"></path></svg><span class="mono">id</span><span class="t">int8</span></div>
+          <div class="col"><span style="width: 12px"></span><span class="mono">email</span><span class="t">text</span></div>
+          <div class="col"><span style="width: 12px"></span><span class="mono">full_name</span><span class="t">text</span></div>
+          <div class="col"><span style="width: 12px"></span><span class="mono">city</span><span class="t">text</span></div>
+          <div class="col"><span style="width: 12px"></span><span class="mono">created_at</span><span class="t">timestamptz</span></div>
+          <button class="tn" role="treeitem" aria-expanded="false" style="padding-left: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path></svg>orders</button>
+          <button class="tn" role="treeitem" aria-expanded="false" style="padding-left: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path></svg>order_items</button>
+          <button class="tn" role="treeitem" aria-expanded="false" style="padding-left: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path></svg>products</button>
+          <button class="tn" role="treeitem" aria-expanded="false" style="padding-left: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path></svg>refunds</button>
+          <button class="tn" role="treeitem" aria-expanded="false" style="padding-left: 22px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"></path><circle cx="12" cy="12" r="3"></circle></svg>v_daily_revenue</button>
+          <button class="tn" role="treeitem" aria-expanded="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>reporting<span class="muted" style="margin-left: auto; font-size: 12px">3</span></button>
+        </div>
+      </section>
+
+      <div style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column">
+        <div class="code" role="textbox" aria-multiline="true" aria-label="Query" style="padding: 14px 0; border-bottom: 1px solid var(--border); min-height: 168px">
+          <div class="ln"><span class="gn">1</span><span class="cl"><span class="k">SELECT </span>id, email, full_name, city, created_at</span></div>
+          <div class="ln"><span class="gn">2</span><span class="cl"><span class="k">FROM </span>customers</span></div>
+          <div class="ln"><span class="gn">3</span><span class="cl"><span class="k">WHERE </span>created_at &gt;= <span class="f">now</span>() - <span class="k">interval </span><span class="s">'30 days'</span></span></div>
+          <div class="ln"><span class="gn">4</span><span class="cl"><span class="k">ORDER BY </span>created_at <span class="k">DESC</span>;</span></div>
+        </div>
+        <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 16px; border-bottom: 1px solid var(--border); font-size: 13px">
+          <span style="font-weight: 500">Results</span>
+          <span class="muted">8 rows · 41 ms</span>
+          <div style="flex: 1"></div>
+          <span class="muted">Showing up to 200 rows</span>
+          <button class="btn btn-ghost btn-sm"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><rect width="14" height="14" x="8" y="8" rx="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>Copy as CSV</button>
+        </div>
+        <div style="flex: 1; overflow: auto">
+          <table class="grid">
+            <thead><tr><th>#</th><th>id<small>int8</small></th><th>email<small>text</small></th><th>full_name<small>text</small></th><th>city<small>text</small></th><th>created_at<small>timestamptz</small></th></tr></thead>
+            <tbody>
+              <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+                <tr><td>{{r.n}}</td><td>{{r.id}}</td><td>{{r.email}}</td><td>{{r.name}}</td><td>{{r.city}}</td><td>{{r.at}}</td></tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+        <div class="muted" style="display: flex; flex-wrap: wrap; gap: 6px 18px; padding: 8px 16px; border-top: 1px solid var(--border); font-size: 12px">
+          <span>Read-only transaction</span><span>5 s timeout</span><span>TLS verified</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const raw = [
+      [20418, 'mai.tran@example.com', 'Tran Mai', 'Hanoi', '2026-10-13 21:04'],
+      [20417, 'khoa.le@example.com', 'Le Khoa', 'Da Nang', '2026-10-13 18:52'],
+      [20416, 'an.nguyen@example.com', 'Nguyen An', 'Ho Chi Minh City', '2026-10-12 09:30'],
+      [20415, 'thu.pham@example.com', 'Pham Thu', 'Hue', '2026-10-11 16:11'],
+      [20414, 'duc.vo@example.com', 'Vo Duc', 'Can Tho', '2026-10-09 08:47'],
+      [20413, 'ha.do@example.com', 'Do Ha', 'Hanoi', '2026-10-06 22:15'],
+      [20412, 'son.bui@example.com', 'Bui Son', 'Hai Phong', '2026-10-02 11:03'],
+      [20411, 'lan.hoang@example.com', 'Hoang Lan', 'Ho Chi Minh City', '2026-09-24 14:26']
+    ];
+    const rows = raw.map((r, i) => ({ n: i + 1, id: r[0], email: r[1], name: r[2], city: r[3], at: r[4] }));
+    return { theme: (this.props.dark ?? false) ? 'dark' : 'light', rows };
+  }
+}
+</script>
+</body>
+</html>

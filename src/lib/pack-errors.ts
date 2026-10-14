@@ -15,6 +15,8 @@ const FALLBACK_PACK_ERROR =
 const RUNTIME_START_ERROR = "Managed PostgreSQL runtime could not be started."
 const RUNTIME_START_GUIDANCE =
   "Managed PostgreSQL runtime could not be started. Install PostgreSQL tools (initdb and pg_ctl) and ensure they are available on PATH."
+const SAFE_RUNTIME_VALIDATION_ERROR =
+  /^Pack runtime validation failed for [a-z][a-z0-9-]*\/[a-z][a-z0-9-]*\.$/u
 
 export function isPackImportDisabled(desktopAvailable: boolean, busy: boolean) {
   return !desktopAvailable || busy
@@ -24,6 +26,9 @@ export function readPackImportError(reason: unknown): string {
   const message = nativeMessage(reason)
   if (message === RUNTIME_START_ERROR) {
     return RUNTIME_START_GUIDANCE
+  }
+  if (SAFE_RUNTIME_VALIDATION_ERROR.test(message)) {
+    return message
   }
   return SAFE_PACK_ERRORS.has(message) ? message : FALLBACK_PACK_ERROR
 }

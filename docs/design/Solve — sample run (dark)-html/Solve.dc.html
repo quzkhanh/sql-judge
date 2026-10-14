@@ -1,0 +1,298 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SQL Judge — Solve: Second highest salary per department</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sj{--bg:#f4f4f6;--fg:#0a0a0c;--card:#ffffff;--muted:#f4f4f5;--muted-fg:#67676f;--border:#e6e6ea;--input:#dedee3;--primary:#18181b;--primary-fg:#fafafa;--hover:#f2f2f4;--ring:#2563eb;--ok:#047857;--ok-bg:#ecfdf3;--err:#b42318;--err-bg:#fef3f2;--warn:#a15c07;--warn-bg:#fff8e6;--line:#f6f6f8;--gutter:#a1a1aa;--kw:#7c3aed;--str:#047857;--num:#b45309;--cmt:#8a8a93;--fn:#2563eb;--shadow:0 1px 2px rgba(16,16,24,.05)}
+.sj.dark{--bg:#060608;--fg:#f4f4f5;--card:#111114;--muted:#1b1b1f;--muted-fg:#a1a1aa;--border:#24242a;--input:#2f2f35;--primary:#f4f4f5;--primary-fg:#111114;--hover:#1b1b1f;--ring:#60a5fa;--ok:#4ade80;--ok-bg:#0f2a1c;--err:#f87171;--err-bg:#2e1515;--warn:#fbbf24;--warn-bg:#2c2109;--line:#18181c;--gutter:#55555e;--kw:#c4b5fd;--str:#86efac;--num:#fcd34d;--cmt:#7c7c86;--fn:#93c5fd;--shadow:0 1px 2px rgba(0,0,0,.5)}
+.sj *{box-sizing:border-box}
+.sj h1,.sj h2,.sj h3,.sj p{margin:0}
+.sj a{color:inherit;text-decoration:none}
+.sj a:hover{color:inherit}
+.sj :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:34px;padding:0 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--fg);font-family:inherit;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer}
+.btn-primary{background:var(--primary);color:var(--primary-fg)}
+.sj .btn-primary:hover{opacity:.88;color:var(--primary-fg)}
+.btn-outline{background:var(--card);border-color:var(--border);box-shadow:var(--shadow)}
+.btn-outline:hover,.btn-ghost:hover{background:var(--hover)}
+.btn-sm{height:30px;padding:0 10px;font-size:13px;gap:6px}
+.btn-icon{width:34px;padding:0}
+.btn-sm.btn-icon{width:30px;padding:0}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--fg);font-size:12px;font-weight:500;white-space:nowrap}
+.b-warn{background:var(--warn-bg);color:var(--warn);border-color:transparent}
+.b-muted{background:var(--muted);color:var(--muted-fg);border-color:transparent}
+.kbd{display:inline-flex;align-items:center;height:18px;padding:0 4px;border-radius:4px;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;opacity:.7}
+.mono{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:var(--muted-fg)}
+.pane{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--card);border:1px solid var(--border);border-radius:10px;overflow:hidden}
+.ph{display:flex;align-items:center;gap:2px;height:42px;padding:0 6px;border-bottom:1px solid var(--border);flex-shrink:0}
+.ptab{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:var(--muted-fg);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer}
+.ptab:hover{background:var(--hover)}
+.ptab.on{color:var(--fg);background:var(--hover)}
+.mt{border-collapse:separate;border-spacing:0;font-size:13px;border:1px solid var(--border);border-radius:8px;overflow:hidden;min-width:220px}
+.mt th{padding:7px 12px;text-align:left;font-weight:500;background:var(--muted);border-bottom:1px solid var(--border);white-space:nowrap}
+.mt th small{display:block;font-weight:400;color:var(--muted-fg);font-family:'Geist Mono',ui-monospace,monospace;font-size:11px}
+.mt td{padding:7px 12px;border-bottom:1px solid var(--border);font-family:'Geist Mono',ui-monospace,monospace;white-space:nowrap}
+.mt tr:last-child td{border-bottom:0}
+.null{font-style:italic;color:var(--muted-fg)}
+.code{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13.5px;line-height:23px}
+.ln{display:flex}
+.gn{width:48px;padding-right:18px;text-align:right;color:var(--gutter);flex-shrink:0;user-select:none}
+.cl{white-space:pre}
+.k{color:var(--kw)}.s{color:var(--str)}.n{color:var(--num)}.c{color:var(--cmt)}.f{color:var(--fn)}
+.grip{flex:0 0 8px;display:flex;align-items:center;justify-content:center}
+.grip span{border-radius:999px;background:var(--border)}
+.sec{display:flex;flex-direction:column;gap:10px}
+.sec h3{font-size:14px;font-weight:600}
+</style>
+</helmet>
+<div class="sj {{theme}}" style="min-height: 100vh; display: flex; flex-direction: column; background: var(--bg); color: var(--fg); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.5">
+
+  <header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-height: 52px; padding: 8px 14px">
+    <div style="display: flex; align-items: center; gap: 6px; flex: 1 1 0; min-width: 260px">
+      <a href="Main.dc.html" aria-label="SQL Judge home" class="mono" style="width: 30px; height: 30px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500; margin-right: 6px">SJ</a>
+      <a class="btn btn-ghost btn-sm" href="{{listHref}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12h18"></path><path d="M3 6h18"></path><path d="M3 18h18"></path></svg>Problem list</a>
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Previous problem"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Next problem"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
+    </div>
+    <div style="display: flex; align-items: center; gap: 8px">
+      <button class="btn btn-outline" title="Run on the public sample (Ctrl Enter)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>Run<span class="kbd">Ctrl ↵</span></button>
+      <button class="btn btn-primary" title="Submit for judging (Ctrl Shift Enter)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>Submit</button>
+    </div>
+    <div style="display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex: 1 1 0; min-width: 200px">
+      <span class="muted" style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px"><span style="width: 7px; height: 7px; border-radius: 999px; background: #16a34a"></span>sj_hr_practice</span>
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Switch theme"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg></button>
+      <a class="btn btn-ghost btn-sm btn-icon" href="Settings.dc.html" aria-label="Settings"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg></a>
+    </div>
+  </header>
+
+  <div style="flex: 1; display: flex; flex-wrap: wrap; padding: 0 10px 10px; min-height: 0">
+
+    <section class="pane" aria-label="Problem" style="flex: 1 1 440px; min-height: 600px">
+      <div class="ph" role="tablist" aria-label="Problem sections">
+        <button class="ptab on" role="tab" aria-selected="true"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><path d="M14 2v6h6"></path><path d="M16 13H8"></path><path d="M16 17H8"></path></svg>Description</button>
+        <button class="ptab" role="tab" aria-selected="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M9 21V9"></path></svg>Schema</button>
+        <button class="ptab" role="tab" aria-selected="false"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>Submissions<span class="badge b-muted" style="height: 18px; padding: 0 6px; font-size: 11px">3</span></button>
+      </div>
+      <div style="flex: 1; overflow: auto; padding: 22px 24px 28px; display: flex; flex-direction: column; gap: 22px">
+        <div style="display: flex; flex-direction: column; gap: 12px">
+          <h1 style="font-size: 21px; font-weight: 600; letter-spacing: -0.015em; line-height: 1.3">2. Second highest salary per department</h1>
+          <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 6px">
+            <span class="badge b-warn">Medium</span>
+            <span class="badge">Window functions</span>
+            <span class="badge">Ranking</span>
+            <span class="muted" style="display: inline-flex; align-items: center; gap: 5px; font-size: 13px; margin-left: 6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px; color: var(--warn)"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"></path></svg>Attempted</span>
+          </div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 12px; font-size: 14.5px; line-height: 1.65; max-width: 64ch">
+          <p>For every department, return the <strong>second highest distinct salary</strong> paid to its employees.</p>
+          <p>Departments with fewer than two distinct salaries must still appear, with <span class="mono" style="font-size: 13px; padding: 1px 5px; border-radius: 4px; background: var(--muted)">NULL</span> as the salary.</p>
+        </div>
+
+        <div class="sec">
+          <h3>Return columns</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 8px">
+            <span class="badge mono" style="font-weight: 400">department_name <span class="muted">text</span></span>
+            <span class="badge mono" style="font-weight: 400">second_salary <span class="muted">numeric</span></span>
+          </div>
+          <p class="muted" style="font-size: 13px">Any row order is accepted. Rows are compared as a multiset, so duplicate rows count.</p>
+        </div>
+
+        <div class="sec">
+          <h3>Example</h3>
+          <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-start">
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <span class="muted mono" style="font-size: 12px">employees</span>
+              <table class="mt">
+                <thead><tr><th>id</th><th>name</th><th>department_id</th><th>salary</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td>Linh</td><td>1</td><td>135000</td></tr>
+                  <tr><td>2</td><td>Minh</td><td>1</td><td>120000</td></tr>
+                  <tr><td>3</td><td>Hoa</td><td>1</td><td>120000</td></tr>
+                  <tr><td>4</td><td>Quan</td><td>2</td><td>98000</td></tr>
+                  <tr><td>5</td><td>Trang</td><td>3</td><td>87000</td></tr>
+                  <tr><td>6</td><td>Bao</td><td>3</td><td>72000</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <span class="muted mono" style="font-size: 12px">departments</span>
+              <table class="mt" style="min-width: 160px">
+                <thead><tr><th>id</th><th>name</th></tr></thead>
+                <tbody>
+                  <tr><td>1</td><td>Engineering</td></tr>
+                  <tr><td>2</td><td>Finance</td></tr>
+                  <tr><td>3</td><td>Design</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <span class="muted" style="font-size: 12px; font-weight: 500">Output</span>
+            <table class="mt" style="align-self: flex-start">
+              <thead><tr><th>department_name</th><th>second_salary</th></tr></thead>
+              <tbody>
+                <tr><td>Engineering</td><td>120000</td></tr>
+                <tr><td>Finance</td><td class="null">NULL</td></tr>
+                <tr><td>Design</td><td>72000</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div style="margin-top: auto; padding-top: 14px; border-top: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12.5px" class="muted">
+          <span>HR Analytics 1.2.0</span><span>PostgreSQL 16</span><span>Judged on 4 fixtures</span><span>2 s limit</span>
+        </div>
+      </div>
+    </section>
+
+    <div class="grip" aria-hidden="true"><span style="width: 3px; height: 36px"></span></div>
+
+    <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+
+      <section class="pane" aria-label="SQL editor" style="flex: 1 1 0; min-height: 360px">
+        <div class="ph" style="justify-content: space-between; padding: 0 6px 0 12px">
+          <div style="display: flex; align-items: center; gap: 10px">
+            <span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px; color: var(--fn)"><path d="m18 16 4-4-4-4"></path><path d="m6 8-4 4 4 4"></path><path d="m14.5 4-5 16"></path></svg>Code</span>
+            <button class="btn btn-ghost btn-sm muted" style="height: 26px; padding: 0 8px; font-weight: 400">PostgreSQL 16<svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="m6 9 6 6 6-6"></path></svg></button>
+          </div>
+          <div style="display: flex; align-items: center; gap: 2px">
+            <span class="muted" style="font-size: 12px; margin-right: 8px">Draft saved</span>
+            <button class="btn btn-ghost btn-sm btn-icon" aria-label="Format SQL" title="Format"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 6H3"></path><path d="M15 12H3"></path><path d="M17 18H3"></path></svg></button>
+            <button class="btn btn-ghost btn-sm btn-icon" aria-label="Reset to starter code" title="Reset"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg></button>
+            <button class="btn btn-ghost btn-sm btn-icon" aria-label="Maximize editor" title="Maximize"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6"></path><path d="M9 21H3v-6"></path><path d="m21 3-7 7"></path><path d="m3 21 7-7"></path></svg></button>
+          </div>
+        </div>
+        <div class="code" role="textbox" aria-multiline="true" aria-label="SQL solution" style="flex: 1; overflow: auto; padding: 10px 0">
+          <div class="ln"><span class="gn">1</span><span class="cl"><span class="k">SELECT </span>d.name <span class="k">AS </span>department_name,</span></div>
+          <div class="ln"><span class="gn">2</span><span class="cl" style="padding-left: 7ch">ranked.salary <span class="k">AS </span>second_salary</span></div>
+          <div class="ln"><span class="gn">3</span><span class="cl"><span class="k">FROM </span>departments d</span></div>
+          <div class="ln"><span class="gn">4</span><span class="cl"><span class="k">LEFT JOIN </span>(</span></div>
+          <div class="ln"><span class="gn">5</span><span class="cl" style="padding-left: 2ch"><span class="k">SELECT </span>department_id,</span></div>
+          <div class="ln"><span class="gn">6</span><span class="cl" style="padding-left: 9ch">salary,</span></div>
+          <div class="ln"><span class="gn">7</span><span class="cl" style="padding-left: 9ch"><span class="f">DENSE_RANK</span>() <span class="k">OVER </span>(</span></div>
+          <div class="ln"><span class="gn">8</span><span class="cl" style="padding-left: 11ch"><span class="k">PARTITION BY </span>department_id</span></div>
+          <div class="ln"><span class="gn">9</span><span class="cl" style="padding-left: 11ch"><span class="k">ORDER BY </span>salary <span class="k">DESC</span></span></div>
+          <div class="ln"><span class="gn">10</span><span class="cl" style="padding-left: 9ch">) <span class="k">AS </span>rnk</span></div>
+          <div class="ln"><span class="gn">11</span><span class="cl" style="padding-left: 2ch"><span class="k">FROM </span>employees</span></div>
+          <div class="ln"><span class="gn">12</span><span class="cl">) ranked</span></div>
+          <div class="ln"><span class="gn">13</span><span class="cl" style="padding-left: 2ch"><span class="k">ON </span>ranked.department_id = d.id</span></div>
+          <div class="ln" style="background: var(--line)"><span class="gn" style="color: var(--fg)">14</span><span class="cl" style="padding-left: 1ch"><span class="k">AND </span>ranked.rnk = <span class="n">2</span>;<span style="display: inline-block; width: 2px; height: 17px; background: var(--fg); vertical-align: -3px"></span></span></div>
+        </div>
+        <div style="display: flex; justify-content: space-between; gap: 12px; padding: 6px 14px; border-top: 1px solid var(--border); font-size: 12px" class="muted">
+          <span>Read-only · one statement</span>
+          <span>Ln 14, Col 22 · 412 chars</span>
+        </div>
+      </section>
+
+      <div class="grip" aria-hidden="true" style="flex: 0 0 8px"><span style="width: 36px; height: 3px"></span></div>
+
+      <section class="pane" aria-label="Results" style="flex: 0 0 auto; min-height: 330px">
+        <div class="ph" role="tablist" aria-label="Result sections">
+          <button class="ptab {{runTab}}" role="tab" aria-selected="{{isRun}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>Run result</button>
+          <button class="ptab {{subTab}}" role="tab" aria-selected="{{isSub}}"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="m22 2-7 20-4-9-9-4Z"></path><path d="M22 2 11 13"></path></svg>Submission</button>
+        </div>
+        <sc-if value="{{isRun}}" hint-placeholder-val="{{false}}">
+        <div style="padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 14px; overflow: auto">
+          <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px">
+            <h2 style="font-size: 17px; font-weight: 600">Ran on sample</h2>
+            <span class="muted" style="font-size: 13px">4 rows · 2 columns · 21 ms · just now</span>
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+            <table class="mt">
+              <thead><tr><th>department_name<small>text</small></th><th>second_salary<small>numeric</small></th></tr></thead>
+              <tbody>
+                <tr><td>Engineering</td><td>120000</td></tr>
+                <tr><td>Engineering</td><td>120000</td></tr>
+                <tr><td>Finance</td><td class="null">NULL</td></tr>
+                <tr><td>Design</td><td>72000</td></tr>
+              </tbody>
+            </table>
+            <div style="flex: 1 1 240px; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 8px; background: var(--muted); font-size: 13px">
+              <span style="font-weight: 500">This run isn't judged</span>
+              <span class="muted">Compare it with the example output, then submit to check it against all 4 fixtures.</span>
+              <span style="display: flex; gap: 6px; margin-top: 4px"><span class="badge" style="font-family: 'Geist Mono', monospace; font-weight: 400">Ctrl Shift ↵</span><span class="muted" style="align-self: center">to submit</span></span>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+        <sc-if value="{{isSub}}" hint-placeholder-val="{{true}}">
+        <div style="padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 16px; overflow: auto">
+          <div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px">
+            <h2 style="display: inline-flex; align-items: center; gap: 8px; font-size: 19px; font-weight: 600; color: var(--err)"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 20px; height: 20px; align-self: center"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>Wrong answer</h2>
+            <span class="muted" style="font-size: 13px">3 of 4 fixtures passed · 38 ms · submitted just now</span>
+          </div>
+
+          <div role="tablist" aria-label="Fixtures" style="display: flex; flex-wrap: wrap; gap: 6px">
+            <button class="btn btn-ghost btn-sm" role="tab" aria-selected="false" style="background: var(--muted)"><span style="width: 6px; height: 6px; border-radius: 999px; background: var(--ok)"></span>Fixture 1</button>
+            <button class="btn btn-outline btn-sm" role="tab" aria-selected="true" style="border-color: var(--err)"><span style="width: 6px; height: 6px; border-radius: 999px; background: var(--err)"></span>Fixture 2 · salary ties</button>
+            <button class="btn btn-ghost btn-sm" role="tab" aria-selected="false" style="background: var(--muted)"><span style="width: 6px; height: 6px; border-radius: 999px; background: var(--ok)"></span>Fixture 3</button>
+            <button class="btn btn-ghost btn-sm" role="tab" aria-selected="false" style="background: var(--muted)"><span style="width: 6px; height: 6px; border-radius: 999px; background: var(--ok)"></span>Fixture 4</button>
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start">
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <span style="font-size: 12px; font-weight: 500" class="muted">Your output · 4 rows</span>
+              <table class="mt">
+                <thead><tr><th>department_name<small>text</small></th><th>second_salary<small>numeric</small></th></tr></thead>
+                <tbody>
+                  <tr><td>Engineering</td><td>120000</td></tr>
+                  <tr style="background: var(--err-bg)"><td style="color: var(--err)">+ Engineering</td><td style="color: var(--err)">120000</td></tr>
+                  <tr><td>Finance</td><td class="null">NULL</td></tr>
+                  <tr><td>Design</td><td>72000</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px">
+              <span style="font-size: 12px; font-weight: 500" class="muted">Expected · 3 rows</span>
+              <table class="mt">
+                <thead><tr><th>department_name<small>text</small></th><th>second_salary<small>numeric</small></th></tr></thead>
+                <tbody>
+                  <tr><td>Engineering</td><td>120000</td></tr>
+                  <tr><td>Finance</td><td class="null">NULL</td></tr>
+                  <tr><td>Design</td><td>72000</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div style="flex: 1 1 220px; display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 8px; background: var(--muted); font-size: 13px">
+              <span style="font-weight: 500">What differs</span>
+              <span class="muted">The row <span class="mono" style="color: var(--fg)">(Engineering, 120000)</span> appears 2× in your output and 1× in the expected result.</span>
+              <span class="muted">Columns and types match. Row order is ignored.</span>
+            </div>
+          </div>
+        </div>
+        </sc-if>
+      </section>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"state":{"editor":"enum","options":["submission","run"],"default":"submission"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dark = this.props.dark ?? false;
+    const isRun = (this.props.state ?? 'submission') === 'run';
+    return {
+      theme: dark ? 'dark' : 'light',
+      listHref: dark ? 'ProblemsDark.dc.html' : 'Problems.dc.html',
+      isRun, isSub: !isRun,
+      runTab: isRun ? 'on' : '', subTab: isRun ? '' : 'on'
+    };
+  }
+}
+</script>
+</body>
+</html>

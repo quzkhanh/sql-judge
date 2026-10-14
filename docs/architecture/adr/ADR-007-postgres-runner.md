@@ -19,8 +19,9 @@ external database.
 
 - The synchronous client keeps the initial adapter deterministic and avoids
   adding async orchestration before Tauri services exist.
-- PostgreSQL `numeric` is reported as an explicit unsupported codec until an
-  exact decimal representation is selected; it is not coerced to float.
+- PostgreSQL `numeric` is decoded from its bounded wire representation into
+  scale-preserving decimal text. It is not coerced to float, and malformed
+  encodings fail closed.
 - Result caps are checked before rows are returned to the domain, but a later
   streaming implementation is still needed to reduce server/client buffering
   for hostile large results.

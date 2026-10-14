@@ -17,7 +17,7 @@ use judge_sqlserver::{
     SqlServerConfig, SqlServerConnectionInfo, SqlServerError, SqlServerExplorer, SqlServerTlsMode,
 };
 use keyring::Entry;
-use problem_pack::{PackData, PackImporter, ValidatedProblem};
+use problem_pack::{PackData, PackError, PackImporter, ValidatedProblem};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -982,7 +982,12 @@ fn import_pack_value(
         .join("packs");
     let published = PackImporter::new(registry)
         .import(&pack, &mut session, "sqljudge_runner")
-        .map_err(|_| "Pack runtime validation or publication failed.")?;
+        .map_err(|error| match error {
+            PackError::RuntimeValidation { problem, test } => {
+                format!("Pack runtime validation failed for {problem}/{test}.")
+            }
+            _ => "Pack runtime validation or publication failed.".to_owned(),
+        })?;
     Ok(PackImportResult {
         status: if published.already_installed {
             "already_installed".to_owned()
@@ -3785,6 +3790,39 @@ mod tests {
 
         assert_eq!(result.status, "published");
         assert_eq!(result.pack_id, "hr-sql-101");
+        assert_eq!(result.version, "1.0.0");
+        assert!(!result.digest.is_empty());
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_imports_checked_in_cte_zip_after_runtime_validation() {
+        let root = std::env::temp_dir().join(format!(
+            "sql-judge-tauri-cte-import-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).expect("create test root");
+        let path = root.join("state.sqlite");
+        let mut native_state = load_environment_state(&path).expect("load native state");
+        ensure_managed_runtime(&mut native_state).expect("start managed runtime");
+        let state = Mutex::new(native_state);
+        let archive = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../examples/postgresql-cte-junior-middle-20.sqljudge.zip");
+        let result = import_pack_value(
+            ImportPackRequest {
+                path: archive.to_string_lossy().into_owned(),
+            },
+            &state,
+        )
+        .expect("import checked-in CTE zip pack");
+
+        assert_eq!(result.status, "published");
+        assert_eq!(result.pack_id, "postgresql-cte-junior-middle-20");
         assert_eq!(result.version, "1.0.0");
         assert!(!result.digest.is_empty());
         drop(state);

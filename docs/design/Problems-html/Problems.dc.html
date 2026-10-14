@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SQL Judge — Problems</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sj{--bg:#ffffff;--fg:#0a0a0c;--card:#ffffff;--sidebar:#fafafa;--muted:#f4f4f5;--muted-fg:#67676f;--border:#e8e8eb;--input:#dedee3;--primary:#18181b;--primary-fg:#fafafa;--hover:#f2f2f4;--ring:#2563eb;--brand:#2563eb;--brand-bg:#eef3ff;--ok:#047857;--ok-bg:#ecfdf3;--err:#b42318;--err-bg:#fef3f2;--warn:#a15c07;--warn-bg:#fff8e6;--danger:#c4321f;--shadow:0 1px 2px rgba(16,16,24,.05);--zebra:#fafafb}
+.sj.dark{--bg:#0a0a0c;--fg:#f4f4f5;--card:#111114;--sidebar:#0e0e11;--muted:#1b1b1f;--muted-fg:#a1a1aa;--border:#25252a;--input:#2f2f35;--primary:#f4f4f5;--primary-fg:#111114;--hover:#1b1b1f;--ring:#60a5fa;--brand:#7aa7ff;--brand-bg:#15213a;--ok:#4ade80;--ok-bg:#0f2a1c;--err:#f87171;--err-bg:#2e1515;--warn:#fbbf24;--warn-bg:#2c2109;--danger:#dc2626;--shadow:0 1px 2px rgba(0,0,0,.5);--zebra:#0e0e11}
+.sj *{box-sizing:border-box}
+.sj h1,.sj h2,.sj h3,.sj p{margin:0}
+.sj a{color:inherit;text-decoration:none}
+.sj a:hover{color:inherit}
+.sj :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--fg);font-family:inherit;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer}
+.btn-primary{background:var(--primary);color:var(--primary-fg)}
+.sj .btn-primary:hover{opacity:.88;color:var(--primary-fg)}
+.btn-outline{background:var(--card);border-color:var(--border);box-shadow:var(--shadow)}
+.btn-outline:hover,.btn-ghost:hover{background:var(--hover)}
+.btn-sm{height:32px;padding:0 10px;font-size:13px;gap:6px}
+.btn-icon{width:36px;padding:0}
+.btn-sm.btn-icon{width:32px;padding:0}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--fg);font-size:12px;font-weight:500;white-space:nowrap}
+.b-muted{background:var(--muted);color:var(--muted-fg);border-color:transparent}
+.input{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--input);background:var(--card);color:var(--fg);font-family:inherit;font-size:14px;box-shadow:var(--shadow)}
+.input input{flex:1;min-width:0;border:0;outline:0;background:transparent;color:var(--fg);font:inherit}
+.input input::placeholder{color:var(--muted-fg)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:8px;font-size:14px;color:var(--fg)}
+.nav:hover{background:var(--hover)}
+.nav .i{color:var(--muted-fg)}
+.nav.on{background:var(--hover);font-weight:500}
+.nav.on .i{color:var(--fg)}
+.grp{padding:0 10px 4px;font-size:12px;font-weight:500;color:var(--muted-fg)}
+.kbd{display:inline-flex;align-items:center;height:20px;padding:0 5px;border:1px solid var(--border);border-radius:5px;background:var(--card);font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;color:var(--muted-fg)}
+.mono{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:var(--muted-fg)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 12px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer}
+.chip:hover{background:var(--hover)}
+.chip.on{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
+.chip .ct{color:var(--muted-fg);font-weight:400}
+.chip.on .ct{color:var(--primary-fg);opacity:.7}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{padding:10px 16px;border-bottom:1px solid var(--border);text-align:left;font-size:13px;font-weight:500;color:var(--muted-fg);white-space:nowrap}
+.tbl td{padding:0 16px;height:48px;vertical-align:middle;border-bottom:1px solid var(--border)}
+.tbl tbody tr:nth-child(even) td{background:var(--zebra)}
+.tbl tbody tr:last-child td{border-bottom:0}
+.tbl tbody tr:hover td{background:var(--hover)}
+.tbl a.t{font-weight:500}
+.tbl a.t:hover{text-decoration:underline;text-underline-offset:3px}
+.bar{height:6px;border-radius:999px;background:var(--muted);overflow:hidden}
+.bar span{display:block;height:100%;border-radius:999px}
+</style>
+</helmet>
+<div class="sj {{theme}}" style="min-height: 100vh; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--fg); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.5">
+
+  <aside aria-label="Main navigation" style="flex: 1 1 248px; display: flex; flex-direction: column; gap: 20px; padding: 14px 12px; background: var(--sidebar); border-right: 1px solid var(--border)">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 2px 6px">
+      <div class="mono" style="width: 30px; height: 30px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500">SJ</div>
+      <div style="display: flex; flex-direction: column; line-height: 1.25">
+        <span style="font-weight: 600">SQL Judge</span>
+        <span class="muted" style="font-size: 12px">Local workspace</span>
+      </div>
+    </div>
+    <button class="input" style="justify-content: space-between; height: 34px; cursor: pointer; color: var(--muted-fg); box-shadow: none">
+      <span style="display: flex; align-items: center; gap: 8px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Search</span>
+      <span class="kbd">Ctrl K</span>
+    </button>
+    <nav style="display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Learn</div>
+        <a class="nav" href="Main.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg>Home</a>
+        <a class="nav on" href="Problems.dc.html" aria-current="page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>Problems</a>
+        <a class="nav" href="History.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>History</a>
+        <a class="nav" href="Progress.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg>Progress</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Library</div>
+        <a class="nav" href="Packs.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path><path d="m3.3 7 8.7 5 8.7-5"></path><path d="M12 22V12"></path></svg>Packs</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Data</div>
+        <a class="nav" href="Environments.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>Environments</a>
+        <a class="nav" href="Connections.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg>Connections</a>
+        <a class="nav" href="Explorer.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path><path d="M12 3v18"></path></svg>Explorer</a>
+      </div>
+    </nav>
+    <div style="flex: 1"></div>
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <a class="nav" href="Environments.dc.html" style="height: auto; padding: 8px 10px; align-items: flex-start">
+        <span style="width: 8px; height: 8px; border-radius: 999px; background: #16a34a; margin-top: 7px; flex-shrink: 0"></span>
+        <span style="display: flex; flex-direction: column; line-height: 1.35"><span style="font-size: 13px; font-weight: 500">Runtime ready</span><span class="muted" style="font-size: 12px">PostgreSQL 16.4 · local socket</span></span>
+      </a>
+      <a class="nav" href="Settings.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg>Settings</a>
+    </div>
+  </aside>
+
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--border)">
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Toggle sidebar"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg></button>
+      <div style="width: 1px; height: 16px; background: var(--border)"></div>
+      <span style="font-weight: 500">Problems</span>
+      <div style="flex: 1"></div>
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Switch theme"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg></button>
+    </header>
+
+    <main style="flex: 1; padding: 32px 40px 48px">
+      <div style="max-width: 1200px; margin: 0 auto; display: flex; flex-wrap: wrap; gap: 28px; align-items: flex-start">
+
+        <div style="flex: 3 1 640px; min-width: 0; display: flex; flex-direction: column; gap: 20px">
+          <div style="display: flex; flex-direction: column; gap: 6px">
+            <h1 style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2">Problems</h1>
+            <p class="muted" style="font-size: 15px">68 problems from 2 installed packs. Open one to start writing SQL.</p>
+          </div>
+
+          <div role="group" aria-label="Filter by topic" style="display: flex; flex-wrap: wrap; gap: 8px">
+            <button class="chip on" aria-pressed="true">All topics</button>
+            <button class="chip" aria-pressed="false">Joins <span class="ct">8</span></button>
+            <button class="chip" aria-pressed="false">Aggregation <span class="ct">12</span></button>
+            <button class="chip" aria-pressed="false">Window functions <span class="ct">14</span></button>
+            <button class="chip" aria-pressed="false">Subqueries <span class="ct">6</span></button>
+            <button class="chip" aria-pressed="false">CTEs <span class="ct">9</span></button>
+            <button class="chip" aria-pressed="false">Dates <span class="ct">7</span></button>
+            <button class="chip" aria-pressed="false">Gaps and islands <span class="ct">4</span></button>
+          </div>
+
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; align-items: center">
+            <label class="input" style="flex: 1 1 260px; width: auto">
+              <svg class="i muted" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+              <input type="search" placeholder="Search by title or topic" aria-label="Search problems">
+              <span class="kbd">/</span>
+            </label>
+            <button class="btn btn-outline">Pack<svg class="i muted" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+            <button class="btn btn-outline">Difficulty<svg class="i muted" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+            <button class="btn btn-outline">Status<svg class="i muted" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+            <button class="btn btn-outline btn-icon" aria-label="Open a random unsolved problem" title="Random unsolved problem"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m18 14 4 4-4 4"></path><path d="m18 2 4 4-4 4"></path><path d="M2 18h1.97a4 4 0 0 0 3.3-1.7l5.46-8.6a4 4 0 0 1 3.3-1.7H22"></path><path d="M2 6h1.97a4 4 0 0 1 3.3 1.7l.92 1.45"></path><path d="M22 18h-5.97a4 4 0 0 1-3.3-1.7l-.92-1.45"></path></svg></button>
+          </div>
+
+          <div class="card" style="overflow: hidden">
+            <div style="overflow-x: auto">
+              <table class="tbl">
+                <thead>
+                  <tr>
+                    <th style="width: 56px">Status</th>
+                    <th>Title</th>
+                    <th>Topics</th>
+                    <th style="width: 100px">Difficulty</th>
+                    <th style="width: 150px">Last attempt</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <sc-for list="{{rows}}" as="r" hint-placeholder-count="10">
+                    <tr>
+                      <td>
+                        <sc-if value="{{r.solved}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" style="color: var(--ok)" role="img" aria-label="Solved"><path d="M20 6 9 17l-5-5"></path></svg></sc-if>
+                        <sc-if value="{{r.tried}}" hint-placeholder-val="{{false}}"><svg class="i" viewBox="0 0 24 24" style="color: var(--warn)" role="img" aria-label="Attempted"><circle cx="12" cy="12" r="9"></circle><path d="M12 3a9 9 0 0 1 0 18z" fill="currentColor" stroke="none"></path></svg></sc-if>
+                      </td>
+                      <td style="min-width: 260px">
+                        <a class="t" href="{{solveHref}}">{{r.n}}. {{r.title}}</a>
+                        <div class="muted" style="font-size: 12px">{{r.pack}}</div>
+                      </td>
+                      <td><span class="muted" style="font-size: 13px">{{r.topics}}</span></td>
+                      <td><span style="font-weight: 500; color: {{r.color}}">{{r.diff}}</span></td>
+                      <td><span class="muted" style="font-size: 13px">{{r.last}}</span></td>
+                    </tr>
+                  </sc-for>
+                </tbody>
+              </table>
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; padding: 12px 16px; border-top: 1px solid var(--border)">
+              <span class="muted" style="font-size: 13px">Showing 1–10 of 68</span>
+              <nav aria-label="Pagination" style="display: flex; gap: 4px">
+                <button class="btn btn-ghost btn-sm btn-icon" aria-label="Previous page" disabled="" style="opacity: .45"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 18-6-6 6-6"></path></svg></button>
+                <button class="btn btn-outline btn-sm btn-icon" aria-current="page">1</button>
+                <button class="btn btn-ghost btn-sm btn-icon">2</button>
+                <button class="btn btn-ghost btn-sm btn-icon">3</button>
+                <button class="btn btn-ghost btn-sm btn-icon" aria-label="Next page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 18 6-6-6-6"></path></svg></button>
+              </nav>
+            </div>
+          </div>
+        </div>
+
+        <aside aria-label="Your progress" style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 20px; padding-top: 4px">
+          <section class="card" style="padding: 20px; display: flex; flex-direction: column; gap: 18px">
+            <h2 style="font-size: 15px; font-weight: 600">Your progress</h2>
+            <div style="display: flex; align-items: center; gap: 20px">
+              <div style="position: relative; width: 96px; height: 96px; flex-shrink: 0">
+                <svg viewBox="0 0 36 36" style="width: 96px; height: 96px; transform: rotate(-90deg)" role="img" aria-label="9 of 68 solved">
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--muted)" stroke-width="3"></circle>
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--ok)" stroke-width="3" stroke-linecap="round" stroke-dasharray="12.8 97.4"></circle>
+                </svg>
+                <div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1">
+                  <span style="font-size: 22px; font-weight: 600">9</span>
+                  <span class="muted" style="font-size: 12px">of 68</span>
+                </div>
+              </div>
+              <div style="flex: 1; display: flex; flex-direction: column; gap: 10px; font-size: 13px">
+                <div style="display: flex; flex-direction: column; gap: 4px">
+                  <div style="display: flex; justify-content: space-between"><span style="color: var(--ok); font-weight: 500">Easy</span><span class="muted">5 / 22</span></div>
+                  <div class="bar"><span style="width: 23%; background: var(--ok)"></span></div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px">
+                  <div style="display: flex; justify-content: space-between"><span style="color: var(--warn); font-weight: 500">Medium</span><span class="muted">3 / 31</span></div>
+                  <div class="bar"><span style="width: 10%; background: var(--warn)"></span></div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 4px">
+                  <div style="display: flex; justify-content: space-between"><span style="color: var(--err); font-weight: 500">Hard</span><span class="muted">1 / 15</span></div>
+                  <div class="bar"><span style="width: 7%; background: var(--err)"></span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" style="padding: 8px; display: flex; flex-direction: column">
+            <h2 style="font-size: 15px; font-weight: 600; padding: 12px 12px 8px">Packs</h2>
+            <button class="nav" style="border: 0; background: var(--hover); font-family: inherit; font-weight: 500; justify-content: space-between; cursor: pointer" aria-pressed="true"><span>All packs</span><span class="muted">68</span></button>
+            <button class="nav" style="border: 0; background: transparent; font-family: inherit; justify-content: space-between; cursor: pointer" aria-pressed="false"><span>HR Analytics</span><span class="muted">24</span></button>
+            <button class="nav" style="border: 0; background: transparent; font-family: inherit; justify-content: space-between; cursor: pointer" aria-pressed="false"><span>E-Commerce Orders</span><span class="muted">44</span></button>
+            <a class="nav muted" href="Packs.dc.html" style="font-size: 13px; margin-top: 4px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>Import another pack</a>
+          </section>
+        </aside>
+
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dark = this.props.dark ?? false;
+    const c = { Easy: 'var(--ok)', Medium: 'var(--warn)', Hard: 'var(--err)' };
+    const raw = [
+      [1, 'Employees above department average', 'HR Analytics', 'Subqueries · Aggregation', 'Easy', 's', 'Accepted · 2 days ago'],
+      [2, 'Second highest salary per department', 'HR Analytics', 'Window functions', 'Medium', 't', 'Wrong answer · 12 min ago'],
+      [3, 'Managers and their reporting chain', 'HR Analytics', 'Recursive CTE', 'Hard', '', '—'],
+      [4, 'Customers with no orders', 'E-Commerce Orders', 'Joins', 'Easy', 's', 'Accepted · 3 days ago'],
+      [5, 'Monthly revenue running total', 'E-Commerce Orders', 'Window functions · Aggregation', 'Medium', '', '—'],
+      [6, 'Top 3 products per category', 'E-Commerce Orders', 'Window functions', 'Medium', '', '—'],
+      [7, 'Repeat buyers within 30 days', 'E-Commerce Orders', 'Self join · Dates', 'Hard', 't', 'Timeout · yesterday'],
+      [8, 'Duplicate employee emails', 'HR Analytics', 'Aggregation', 'Easy', '', '—'],
+      [9, 'Department headcount by year', 'HR Analytics', 'Aggregation · Dates', 'Easy', 's', 'Accepted · last week'],
+      [10, 'Longest daily login streak', 'E-Commerce Orders', 'Gaps and islands', 'Hard', '', '—']
+    ];
+    const rows = raw.map((r) => ({ n: r[0], title: r[1], pack: r[2], topics: r[3], diff: r[4], color: c[r[4]], solved: r[5] === 's', tried: r[5] === 't', last: r[6] }));
+    return { theme: dark ? 'dark' : 'light', rows, solveHref: dark ? 'SolveDark.dc.html' : 'Solve.dc.html' };
+  }
+}
+</script>
+</body>
+</html>

@@ -2,8 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import Editor from "@monaco-editor/react"
 import {
   CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
   Database,
   Filter,
+  LoaderCircle,
   Play,
   RefreshCw,
   Send,
@@ -22,6 +25,7 @@ import {
 } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { cn } from "@/lib/utils"
 import {
   cancelJudge,
@@ -47,6 +51,13 @@ import {
   type JudgeRequest,
 } from "./judge-state"
 import { learningLoadErrorMessage } from "./load-state"
+import {
+  pageForProblem,
+  paginateProblems,
+  problemsForPack,
+  stopVisibleAfter,
+} from "./practice-workspace-state"
+import { sqlCompletionItems } from "./sql-completions"
 
 const difficultyLabels: Record<ProblemDifficulty, string> = {
   easy: "Easy",
@@ -61,13 +72,18 @@ const MAX_RENDERED_CELL_LENGTH = 512
 export function LearningWorkspace() {
   const [packs, setPacks] = useState<InstalledPack[]>([])
   const [query, setQuery] = useState("")
+  const [jumpQuery, setJumpQuery] = useState("")
   const [dialect, setDialect] = useState<ProblemDialect | "all">("all")
   const [difficulty, setDifficulty] = useState<ProblemDifficulty | "all">("all")
+  const [selectedPackId, setSelectedPackId] = useState("")
   const [selectedId, setSelectedId] = useState("")
   const [drafts, setDrafts] = useState<Record<string, string>>({})
   const [result, setResult] = useState<JudgeRunResult | null>(null)
   const [busy, setBusy] = useState(false)
   const [activeRequestId, setActiveRequestId] = useState<string | null>(null)
+  const [activeMode, setActiveMode] = useState<"run" | "submit" | null>(null)
+  const [page, setPage] = useState(0)
+  const [elapsedBusyMs, setElapsedBusyMs] = useState(0)
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [catalogReloadToken, setCatalogReloadToken] = useState(0)
@@ -75,6 +91,8 @@ export function LearningWorkspace() {
   const judgeGenerationRef = useRef(0)
   const activeJudgeRequestRef = useRef<JudgeRequest | null>(null)
   const activeRequestIdRef = useRef<string | null>(null)
+  const completionItemsRef = useRef<ReturnType<typeof sqlCompletionItems>>([])
+  const completionProviderRef = useRef<{ dispose(): void } | null>(null)
 
   function invalidateJudgeRequests() {
     judgeGenerationRef.current += 1
@@ -82,6 +100,7 @@ export function LearningWorkspace() {
     activeRequestIdRef.current = null
     setBusy(false)
     setActiveRequestId(null)
+    setActiveMode(null)
     setResult(null)
   }
 
@@ -122,6 +141,11 @@ export function LearningWorkspace() {
           return
         }
         setPacks(installedPacks)
+        setSelectedPackId((current) =>
+          installedPacks.some((pack) => pack.packId === current)
+            ? current
+            : (installedPacks[0]?.packId ?? "")
+        )
         const firstProblem = installedPacks[0]?.problems[0]
         const availableIds = new Set(
           installedPacks.flatMap((pack) =>
@@ -157,9 +181,17 @@ export function LearningWorkspace() {
   }, [catalogReloadToken])
 
   const learningProblems = useMemo(() => catalogProblems(packs), [packs])
+  const packProblems = useMemo(
+    () => problemsForPack(learningProblems, selectedPackId),
+    [learningProblems, selectedPackId]
+  )
   const filteredProblems = useMemo(
-    () => filterProblems(learningProblems, query, dialect, difficulty),
-    [difficulty, dialect, learningProblems, query]
+    () => filterProblems(packProblems, query, dialect, difficulty),
+    [difficulty, dialect, packProblems, query]
+  )
+  const paginatedProblems = useMemo(
+    () => paginateProblems(filteredProblems, page),
+    [filteredProblems, page]
   )
   const selectedProblem = learningProblems.find(
     (problem) => problem.id === selectedId
@@ -181,6 +213,23 @@ export function LearningWorkspace() {
     }
   const draft = drafts[selectedProblem.id] ?? selectedProblem.starterSql
   const judgeable = canJudgeProblem(selectedProblem)
+  const completionItems = useMemo(
+    () => sqlCompletionItems(selectedProblem.dialect, selectedProblem.schema),
+    [selectedProblem.dialect, selectedProblem.schema]
+  )
+
+  useEffect(() => {
+    completionItemsRef.current = completionItems
+  }, [completionItems])
+
+  useEffect(() => {
+    if (!busy) {
+      return
+    }
+    const startedAt = Date.now()
+    const timer = window.setInterval(() => setElapsedBusyMs(Date.now() - startedAt), 100)
+    return () => window.clearInterval(timer)
+  }, [busy])
 
   function updateDraft(value: string | undefined) {
     setDrafts((current) => ({
@@ -203,7 +252,9 @@ export function LearningWorkspace() {
     activeJudgeRequestRef.current = request
     activeRequestIdRef.current = requestId
     setBusy(true)
+    setElapsedBusyMs(0)
     setActiveRequestId(requestId)
+    setActiveMode(mode)
     setResult(null)
     try {
       const nextResult = await runJudge({
@@ -251,6 +302,7 @@ export function LearningWorkspace() {
         activeRequestIdRef.current = null
         setBusy(false)
         setActiveRequestId(null)
+        setActiveMode(null)
       }
     }
   }
@@ -274,18 +326,40 @@ export function LearningWorkspace() {
             SQL Judge
           </h2>
           <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-            Work against clean fixtures, inspect the schema, then submit a typed
-            result for judging.
+            Select a pack, solve one problem, and submit against isolated fixtures.
           </p>
         </div>
+        <label className="flex flex-col gap-1 text-xs font-medium text-muted-foreground">
+          Active pack
+          <select
+            className="h-9 min-w-56 rounded-lg border border-input bg-background px-2 text-sm text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+            value={selectedPackId}
+            onChange={(event) => {
+              const packId = event.target.value
+              setSelectedPackId(packId)
+              setPage(0)
+              const firstProblem = problemsForPack(learningProblems, packId)[0]
+              if (firstProblem) {
+                selectProblem(firstProblem.id)
+              }
+            }}
+            disabled={catalogLoading || packs.length === 0}
+          >
+            {packs.map((pack) => (
+              <option key={`${pack.packId}-${pack.version}`} value={pack.packId}>
+                {pack.title} · {pack.version}
+              </option>
+            ))}
+          </select>
+        </label>
       </header>
 
-      <div className="grid min-h-0 flex-1 gap-4 lg:grid-cols-[280px_minmax(0,1fr)_300px]">
+      <div className="grid min-h-0 flex-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_300px]">
         <Card className="min-h-0 xl:flex">
           <CardHeader className="gap-3 border-b">
             <div className="flex items-center justify-between">
               <CardTitle className="text-sm">Problems</CardTitle>
-              <Badge variant="secondary">{filteredProblems.length}</Badge>
+              <Badge variant="secondary">{packProblems.length}</Badge>
             </div>
             <Label className="sr-only" htmlFor="problem-search">
               Search problems
@@ -293,7 +367,10 @@ export function LearningWorkspace() {
             <Input
               id="problem-search"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => {
+                setQuery(event.target.value)
+                setPage(0)
+              }}
               placeholder="Search topics or title"
               aria-describedby="problem-filter-help"
             />
@@ -303,15 +380,41 @@ export function LearningWorkspace() {
             >
               Filter by title, statement, or topic.
             </p>
+            <Label className="sr-only" htmlFor="problem-jump">
+              Jump to a problem
+            </Label>
+            <Input
+              id="problem-jump"
+              value={jumpQuery}
+              list="pack-problem-options"
+              onChange={(event) => {
+                const nextValue = event.target.value
+                setJumpQuery(nextValue)
+                const problem = packProblems.find(
+                  (candidate) => candidate.title === nextValue
+                )
+                if (problem) {
+                  selectProblem(problem.id)
+                  setPage(pageForProblem(filteredProblems, problem.id))
+                }
+              }}
+              placeholder="Jump to a problem"
+            />
+            <datalist id="pack-problem-options">
+              {packProblems.map((problem) => (
+                <option key={problem.id} value={problem.title} />
+              ))}
+            </datalist>
             <div className="grid grid-cols-2 gap-2">
               <label className="flex flex-col gap-1 text-[11px] font-medium text-muted-foreground">
                 Dialect
                 <select
                   className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                   value={dialect}
-                  onChange={(event) =>
+                  onChange={(event) => {
                     setDialect(event.target.value as ProblemDialect | "all")
-                  }
+                    setPage(0)
+                  }}
                   aria-label="Filter by dialect"
                 >
                   <option value="all">All</option>
@@ -324,11 +427,10 @@ export function LearningWorkspace() {
                 <select
                   className="h-8 rounded-lg border border-input bg-background px-2 text-xs text-foreground outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
                   value={difficulty}
-                  onChange={(event) =>
-                    setDifficulty(
-                      event.target.value as ProblemDifficulty | "all"
-                    )
-                  }
+                  onChange={(event) => {
+                    setDifficulty(event.target.value as ProblemDifficulty | "all")
+                    setPage(0)
+                  }}
                   aria-label="Filter by difficulty"
                 >
                   <option value="all">All</option>
@@ -375,18 +477,34 @@ export function LearningWorkspace() {
                 role="listbox"
                 aria-label="SQL problems"
               >
-                {filteredProblems.map((problem) => (
+                {paginatedProblems.items.map((problem) => (
                   <ProblemListItem
                     key={problem.id}
                     problem={problem}
                     selected={problem.id === selectedProblem.id}
                     onSelect={() => {
                       selectProblem(problem.id)
+                      setPage(pageForProblem(filteredProblems, problem.id))
                     }}
                   />
                 ))}
               </div>
             )}
+            {filteredProblems.length > 0 ? (
+              <div className="mt-3 flex items-center justify-between border-t pt-3 text-xs text-muted-foreground">
+                <span>
+                  {paginatedProblems.start + 1}-{paginatedProblems.end} of {filteredProblems.length}
+                </span>
+                <div className="flex gap-1">
+                  <Button variant="outline" size="icon-sm" aria-label="Previous problems" disabled={paginatedProblems.page === 0} onClick={() => setPage((current) => current - 1)}>
+                    <ChevronLeft />
+                  </Button>
+                  <Button variant="outline" size="icon-sm" aria-label="Next problems" disabled={paginatedProblems.page >= paginatedProblems.totalPages - 1} onClick={() => setPage((current) => current + 1)}>
+                    <ChevronRight />
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -419,8 +537,8 @@ export function LearningWorkspace() {
                       : "An installed problem pack is required"
                   }
                 >
-                  <Play />
-                  Run sample
+                  {busy && activeMode === "run" ? <LoaderCircle className="animate-spin" /> : <Play />}
+                  {busy && activeMode === "run" ? "Running" : "Run sample"}
                 </Button>
                 <Button
                   size="sm"
@@ -438,17 +556,17 @@ export function LearningWorkspace() {
                       : "An installed problem pack is required"
                   }
                 >
-                  <Send />
-                  Submit
+                  {busy && activeMode === "submit" ? <LoaderCircle className="animate-spin" /> : <Send />}
+                  {busy && activeMode === "submit" ? "Submitting" : "Submit"}
                 </Button>
-                {busy && activeRequestId ? (
+                {busy && activeRequestId && stopVisibleAfter(elapsedBusyMs) ? (
                   <Button
                     variant="destructive"
                     size="sm"
                     onClick={() => void cancelActiveJudge()}
                   >
                     <XCircle />
-                    Cancel
+                    Stop
                   </Button>
                 ) : null}
               </div>
@@ -463,6 +581,20 @@ export function LearningWorkspace() {
                 theme="vs-dark"
                 value={draft}
                 onChange={updateDraft}
+                onMount={(_editor, monaco) => {
+                  completionProviderRef.current?.dispose()
+                  completionProviderRef.current = monaco.languages.registerCompletionItemProvider("sql", {
+                    provideCompletionItems: () => ({
+                      suggestions: completionItemsRef.current.map((item) => ({
+                        label: item.label,
+                        detail: item.detail,
+                        insertText: item.insertText,
+                        insertTextRules: item.kind === "snippet" ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined,
+                        kind: item.kind === "table" ? monaco.languages.CompletionItemKind.Struct : item.kind === "column" ? monaco.languages.CompletionItemKind.Field : item.kind === "snippet" ? monaco.languages.CompletionItemKind.Snippet : monaco.languages.CompletionItemKind.Keyword,
+                      })),
+                    }),
+                  })
+                }}
                 options={{
                   ariaLabel: `SQL editor for ${selectedProblem.title}`,
                   automaticLayout: true,
@@ -489,13 +621,20 @@ export function LearningWorkspace() {
           </CardContent>
         </Card>
 
-        <Card className="min-h-0 overflow-y-auto">
+        <Card className="min-h-0 overflow-y-auto xl:col-start-3 xl:row-start-1">
           <CardHeader className="border-b">
             <CardTitle className="flex items-center gap-2 text-sm">
               <Table2 className="size-4" /> Problem context
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-5 p-4">
+          <CardContent className="p-4">
+            <Tabs defaultValue="statement">
+              <TabsList variant="line" className="w-full justify-start border-b">
+                <TabsTrigger value="statement">Statement</TabsTrigger>
+                <TabsTrigger value="schema">Schema</TabsTrigger>
+                <TabsTrigger value="sample">Sample</TabsTrigger>
+              </TabsList>
+              <TabsContent value="statement" className="space-y-5 pt-4">
             <section aria-labelledby="statement-heading">
               <h3
                 id="statement-heading"
@@ -507,6 +646,14 @@ export function LearningWorkspace() {
                 {selectedProblem.statement}
               </p>
             </section>
+            <section aria-labelledby="topics-heading">
+              <h3 id="topics-heading" className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">Topics</h3>
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {selectedProblem.topics.map((topic) => <Badge key={topic} variant="outline">{topic}</Badge>)}
+              </div>
+            </section>
+              </TabsContent>
+              <TabsContent value="schema" className="pt-4">
             <section aria-labelledby="schema-heading">
               <h3
                 id="schema-heading"
@@ -549,21 +696,8 @@ export function LearningWorkspace() {
                 )}
               </div>
             </section>
-            <section aria-labelledby="topics-heading">
-              <h3
-                id="topics-heading"
-                className="text-xs font-semibold tracking-wide text-muted-foreground uppercase"
-              >
-                Topics
-              </h3>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {selectedProblem.topics.map((topic) => (
-                  <Badge key={topic} variant="outline">
-                    {topic}
-                  </Badge>
-                ))}
-              </div>
-            </section>
+              </TabsContent>
+              <TabsContent value="sample" className="pt-4">
             <section aria-labelledby="sample-heading">
               <h3
                 id="sample-heading"
@@ -605,6 +739,8 @@ export function LearningWorkspace() {
                 </p>
               )}
             </section>
+              </TabsContent>
+            </Tabs>
           </CardContent>
         </Card>
       </div>

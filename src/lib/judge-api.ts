@@ -48,6 +48,10 @@ export type JudgeRunResult = {
   message: string
 }
 
+export function nativeRequest<T>(request: T) {
+  return { request }
+}
+
 export type ManagedEnvironmentSummary = {
   envId: string
   instanceId: string
@@ -238,7 +242,7 @@ export async function runJudge(
 
   return trackedInvoke<JudgeRunResult>(
     request.mode === "run" ? "run_sample" : "submit_solution",
-    request
+    nativeRequest(request)
   )
 }
 
@@ -284,7 +288,7 @@ export async function createManagedEnvironment(
 
   return trackedInvoke<ManagedEnvironmentSummary>(
     "create_managed_environment",
-    request
+    nativeRequest(request)
   )
 }
 
@@ -299,7 +303,7 @@ export async function cloneManagedEnvironment(
 
   return trackedInvoke<ManagedEnvironmentSummary>(
     "clone_managed_environment",
-    request
+    nativeRequest(request)
   )
 }
 
@@ -318,7 +322,7 @@ export async function resetManagedEnvironment(
 
   return trackedInvoke<ManagedEnvironmentSummary>(
     "reset_managed_environment",
-    request
+    nativeRequest(request)
   )
 }
 
@@ -335,7 +339,7 @@ export async function deleteManagedEnvironment(
     throw new Error("Explicit delete confirmation is required.")
   }
 
-  await trackedInvoke<void>("delete_managed_environment", request)
+  await trackedInvoke<void>("delete_managed_environment", nativeRequest(request))
 }
 
 export async function listSubmissionHistory(): Promise<
@@ -353,7 +357,7 @@ export async function importPack(path: string): Promise<PackImportResult> {
     throw new Error("Pack import is only available in the desktop app.")
   }
 
-  return trackedInvoke<PackImportResult>("import_pack", { path })
+  return trackedInvoke<PackImportResult>("import_pack", nativeRequest({ path }))
 }
 
 export async function inspectManagedPack(
@@ -469,7 +473,7 @@ export async function saveConnectionProfile(
 
   return trackedInvoke<ConnectionProfileSummary>(
     "save_connection_profile",
-    request
+    nativeRequest(request)
   )
 }
 
@@ -494,9 +498,10 @@ export async function testExternalConnection(
     )
   }
 
-  return trackedInvoke<ExternalConnectionInfo>("test_external_connection", {
-    profileId,
-  })
+  return trackedInvoke<ExternalConnectionInfo>(
+    "test_external_connection",
+    nativeRequest({ profileId })
+  )
 }
 
 export async function listExternalMetadata(
@@ -508,9 +513,10 @@ export async function listExternalMetadata(
     )
   }
 
-  return trackedInvoke<ExternalMetadata>("list_external_metadata", {
-    profileId,
-  })
+  return trackedInvoke<ExternalMetadata>(
+    "list_external_metadata",
+    nativeRequest({ profileId })
+  )
 }
 
 export async function executeExternalSelect(
@@ -522,7 +528,10 @@ export async function executeExternalSelect(
     )
   }
 
-  return trackedInvoke<ExternalQueryResult>("execute_external_select", request)
+  return trackedInvoke<ExternalQueryResult>(
+    "execute_external_select",
+    nativeRequest(request)
+  )
 }
 
 export async function testExternalSqlServer(
@@ -534,9 +543,10 @@ export async function testExternalSqlServer(
     )
   }
 
-  return trackedInvoke<ExternalConnectionInfo>("test_external_sqlserver", {
-    profileId,
-  })
+  return trackedInvoke<ExternalConnectionInfo>(
+    "test_external_sqlserver",
+    nativeRequest({ profileId })
+  )
 }
 
 export async function listExternalSqlServerMetadata(
@@ -548,9 +558,10 @@ export async function listExternalSqlServerMetadata(
     )
   }
 
-  return trackedInvoke<ExternalMetadata>("list_external_sqlserver_metadata", {
-    profileId,
-  })
+  return trackedInvoke<ExternalMetadata>(
+    "list_external_sqlserver_metadata",
+    nativeRequest({ profileId })
+  )
 }
 
 export async function executeExternalSqlServerSelect(
@@ -564,6 +575,6 @@ export async function executeExternalSqlServerSelect(
 
   return trackedInvoke<ExternalQueryResult>(
     "execute_external_sqlserver_select",
-    request
+    nativeRequest(request)
   )
 }

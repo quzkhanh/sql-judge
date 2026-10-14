@@ -2,7 +2,7 @@ use fallible_iterator::FallibleIterator;
 use judge_core::{Column, LogicalType, QueryLimits, QueryResult, SqlValue};
 use postgres::{
     Client, Config, NoTls, Row,
-    types::{ToSql, Type},
+    types::{FromSql, ToSql, Type},
 };
 use postgres_native_tls::MakeTlsConnector;
 use std::collections::BTreeMap;
@@ -1651,6 +1651,99 @@ fn logical_type(postgres_type: &Type) -> Result<LogicalType, QueryExecutionError
     }
 }
 
+struct NumericText(String);
+
+impl<'a> FromSql<'a> for NumericText {
+    fn from_sql(_ty: &Type, raw: &'a [u8]) -> Result<Self, Box<dyn StdError + Sync + Send>> {
+        if raw.len() < 8 {
+            return Err("invalid PostgreSQL numeric value".into());
+        }
+
+        let read_i16 = |offset: usize| -> Result<i16, Box<dyn StdError + Sync + Send>> {
+            let bytes = raw
+                .get(offset..offset + 2)
+                .ok_or("invalid PostgreSQL numeric value")?;
+            Ok(i16::from_be_bytes([bytes[0], bytes[1]]))
+        };
+        let ndigits =
+            usize::try_from(read_i16(0)?).map_err(|_| "invalid PostgreSQL numeric value")?;
+        let weight = read_i16(2)? as i32;
+        let sign = read_i16(4)? as u16;
+        let dscale =
+            usize::try_from(read_i16(6)?).map_err(|_| "invalid PostgreSQL numeric value")?;
+        let expected_len = 8usize
+            .checked_add(
+                ndigits
+                    .checked_mul(2)
+                    .ok_or("invalid PostgreSQL numeric value")?,
+            )
+            .ok_or("invalid PostgreSQL numeric value")?;
+        if raw.len() != expected_len {
+            return Err("invalid PostgreSQL numeric value".into());
+        }
+        if sign == 0xC000 {
+            return Ok(Self("NaN".to_owned()));
+        }
+        if sign != 0x0000 && sign != 0x4000 {
+            return Err("invalid PostgreSQL numeric sign".into());
+        }
+
+        let mut digits = String::new();
+        for index in 0..ndigits {
+            let offset = 8 + index * 2;
+            let digit = u16::from_be_bytes([raw[offset], raw[offset + 1]]);
+            if digit >= 10_000 {
+                return Err("invalid PostgreSQL numeric digit".into());
+            }
+            digits.push_str(&format!("{digit:04}"));
+        }
+
+        let decimal_index = (weight + 1) * 4;
+        let (mut integer, mut fraction) = if decimal_index <= 0 {
+            (
+                "0".to_owned(),
+                format!("{}{}", "0".repeat((-decimal_index) as usize), digits),
+            )
+        } else if decimal_index as usize >= digits.len() {
+            (
+                format!(
+                    "{}{}",
+                    digits,
+                    "0".repeat(decimal_index as usize - digits.len())
+                ),
+                String::new(),
+            )
+        } else {
+            let split = decimal_index as usize;
+            (digits[..split].to_owned(), digits[split..].to_owned())
+        };
+
+        integer = integer.trim_start_matches('0').to_owned();
+        if integer.is_empty() {
+            integer.push('0');
+        }
+        fraction.truncate(dscale);
+        if fraction.len() < dscale {
+            fraction.push_str(&"0".repeat(dscale - fraction.len()));
+        }
+        let is_zero = integer == "0" && fraction.chars().all(|character| character == '0');
+        let value = if dscale == 0 {
+            integer
+        } else {
+            format!("{integer}.{fraction}")
+        };
+        Ok(Self(if sign == 0x4000 && !is_zero {
+            format!("-{value}")
+        } else {
+            value
+        }))
+    }
+
+    fn accepts(ty: &Type) -> bool {
+        *ty == Type::NUMERIC
+    }
+}
+
 fn decode_row(row: &Row) -> Result<Vec<SqlValue>, QueryExecutionError> {
     row.columns()
         .iter()
@@ -1672,7 +1765,10 @@ fn decode_row(row: &Row) -> Result<Vec<SqlValue>, QueryExecutionError> {
                 .try_get::<_, Option<i64>>(index)
                 .map(|value| value.map_or(SqlValue::Null, SqlValue::Signed))
                 .map_err(|_| QueryExecutionError::RuntimeError),
-            Type::NUMERIC => Err(QueryExecutionError::UnsupportedType("numeric".to_owned())),
+            Type::NUMERIC => row
+                .try_get::<_, Option<NumericText>>(index)
+                .map(|value| value.map_or(SqlValue::Null, |value| SqlValue::Decimal(value.0)))
+                .map_err(|_| QueryExecutionError::RuntimeError),
             Type::FLOAT4 => row
                 .try_get::<_, Option<f32>>(index)
                 .map(|value| {

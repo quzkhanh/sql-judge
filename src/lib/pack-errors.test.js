@@ -24,6 +24,12 @@ describe("readPackImportError", () => {
     ).toContain("pg_ctl")
   })
 
+  test("preserves safe runtime validation coordinates", () => {
+    const message =
+      "Pack runtime validation failed for eligible-task-filter/basic."
+    expect(readPackImportError(message)).toBe(message)
+  })
+
   test("does not expose unknown native error details", () => {
     expect(readPackImportError("/tmp/secret.sql: password=secret")).toBe(
       "Pack import failed closed. No unvalidated pack was published."

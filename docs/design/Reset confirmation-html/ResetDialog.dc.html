@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SQL Judge — Reset environment confirmation</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.dlg{--fg:#0a0a0c;--card:#ffffff;--muted:#f4f4f5;--muted-fg:#67676f;--border:#e8e8eb;--input:#dedee3;--hover:#f2f2f4;--ring:#2563eb;--danger:#c4321f;--err:#b42318;--err-bg:#fef3f2;--ok:#047857;--overlay:rgba(9,9,11,.45)}
+.dlg.dark{--fg:#f4f4f5;--card:#111114;--muted:#1b1b1f;--muted-fg:#a1a1aa;--border:#25252a;--input:#2f2f35;--hover:#1b1b1f;--ring:#60a5fa;--danger:#dc2626;--err:#f87171;--err-bg:#2e1515;--ok:#4ade80;--overlay:rgba(0,0,0,.6)}
+.dlg *{box-sizing:border-box}
+.dlg h2,.dlg p{margin:0}
+.dlg :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.dlg .i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.dlg .b{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;font-family:inherit;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.dlg .b-out{background:var(--card);color:var(--fg);border-color:var(--border)}
+.dlg .b-out:hover{background:var(--hover)}
+.dlg .b-dan{background:var(--danger);color:#fff}
+.dlg .mono{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+.dlg .muted{color:var(--muted-fg)}
+.dlg .imp{display:grid;grid-template-columns:20px 1fr;gap:10px;font-size:13.5px}
+.dlg .fld{display:flex;align-items:center;width:100%;height:38px;padding:0 12px;border-radius:8px;border:1px solid var(--input);background:var(--card);color:var(--fg);font-family:'Geist Mono',ui-monospace,monospace;font-size:13.5px}
+</style>
+</helmet>
+<div style="position: relative; min-height: 100vh">
+  <dc-import name="Environments" dark="{{dark}}" hint-size="100%,900px"></dc-import>
+
+  <div class="dlg {{theme}}" style="position: absolute; inset: 0; background: var(--overlay); display: flex; align-items: center; justify-content: center; padding: 24px; font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; color: var(--fg); line-height: 1.5">
+    <section role="alertdialog" aria-modal="true" aria-labelledby="dlg-title" aria-describedby="dlg-desc" style="width: 100%; max-width: 520px; background: var(--card); border: 1px solid var(--border); border-radius: 14px; box-shadow: 0 24px 64px rgba(0,0,0,.22); padding: 24px; display: flex; flex-direction: column; gap: 20px">
+      <div style="display: flex; gap: 14px; align-items: flex-start">
+        <div style="width: 40px; height: 40px; border-radius: 999px; background: var(--err-bg); color: var(--err); display: flex; align-items: center; justify-content: center; flex-shrink: 0">
+          <svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 18px; height: 18px"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <h2 id="dlg-title" style="font-size: 18px; font-weight: 600; letter-spacing: -0.01em">Reset <span class="mono" style="font-size: 16px">sj_hr_practice</span>?</h2>
+          <p id="dlg-desc" class="muted" style="font-size: 14px">The schema is rebuilt from HR Analytics 1.2.0. Anything you changed inside it is lost. If the rebuild fails halfway, the current schema stays as it is.</p>
+        </div>
+      </div>
+
+      <div style="border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+        <div class="imp"><svg class="i" viewBox="0 0 24 24" style="color: var(--err)" aria-hidden="true"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg><span><b style="font-weight: 500">Recreated:</b> <span class="muted">5 tables, 1,240 rows in this schema only</span></span></div>
+        <div class="imp"><svg class="i" viewBox="0 0 24 24" style="color: var(--ok)" aria-hidden="true"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path><path d="m9 12 2 2 4-4"></path></svg><span><b style="font-weight: 500">Owner verified:</b> <span class="muted">created by SQL Judge on this runtime</span></span></div>
+        <div class="imp"><svg class="i" viewBox="0 0 24 24" style="color: var(--ok)" aria-hidden="true"><path d="M20 6 9 17l-5-5"></path></svg><span><b style="font-weight: 500">Not affected:</b> <span class="muted">submission history, other schemas, your external connections</span></span></div>
+      </div>
+
+      <label style="display: flex; flex-direction: column; gap: 8px; font-size: 14px">
+        <span>Type <span class="mono" style="font-weight: 500; padding: 1px 5px; border-radius: 4px; background: var(--muted)">sj_hr_practice</span> to confirm</span>
+        <span class="fld" style="border-color: var(--ring); box-shadow: 0 0 0 3px rgba(37,99,235,.15)">sj_hr_practice<span style="display: inline-block; width: 1.5px; height: 16px; background: var(--fg); margin-left: 1px"></span></span>
+      </label>
+
+      <div style="display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px">
+        <a class="b b-out" href="Environments.dc.html">Cancel</a>
+        <a class="b b-dan" href="Environments.dc.html">Reset environment</a>
+      </div>
+    </section>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dark = this.props.dark ?? false;
+    return { dark, theme: dark ? 'dark' : 'light' };
+  }
+}
+</script>
+</body>
+</html>

@@ -3,12 +3,12 @@ import {
   BarChart3,
   BookOpen,
   Cable,
-  ChartNoAxesColumn,
-  Command,
   Database,
   FolderOpen,
   History,
+  Home,
   LayoutDashboard,
+  Search,
 } from "lucide-react"
 
 import {
@@ -25,18 +25,33 @@ import {
 } from "@/components/ui/sidebar"
 
 export type AppRoute =
-  "practice" | "environments" | "history" | "progress" | "packs" | "connections"
+  | "home"
+  | "practice"
+  | "environments"
+  | "history"
+  | "progress"
+  | "packs"
+  | "connections"
 
-const navigation: Array<{
+type NavigationItem = {
   route: AppRoute
   label: string
   icon: typeof LayoutDashboard
-}> = [
+}
+
+const navigation: NavigationItem[] = [
+  { route: "home", label: "Home", icon: Home },
   { route: "practice", label: "Practice", icon: LayoutDashboard },
-  { route: "environments", label: "Environments", icon: Database },
   { route: "history", label: "History", icon: History },
   { route: "progress", label: "Progress", icon: BarChart3 },
+]
+
+const libraryNavigation: NavigationItem[] = [
   { route: "packs", label: "Packs", icon: FolderOpen },
+]
+
+const dataNavigation: NavigationItem[] = [
+  { route: "environments", label: "Environments", icon: Database },
   { route: "connections", label: "Connections", icon: Cable },
 ]
 
@@ -47,22 +62,33 @@ export function AppSidebar({
   return (
     <Sidebar collapsible="offcanvas" {...props}>
       <SidebarHeader>
-        <SidebarMenu>
+        <SidebarMenu className="mt-1">
           <SidebarMenuItem>
             <SidebarMenuButton
-              className="data-[slot=sidebar-menu-button]:p-1.5!"
-              render={<a href="#practice" />}
-              isActive={activeRoute === "practice"}
+              className="h-auto! data-[slot=sidebar-menu-button]:p-1.5!"
+              render={<a href="#home" />}
+              isActive={activeRoute === "home"}
             >
-              <Command className="size-5!" />
-              <span className="text-base font-semibold">SQL Judge</span>
+              <span className="flex size-7 items-center justify-center rounded-lg bg-sidebar-primary font-mono text-xs font-medium text-sidebar-primary-foreground">SJ</span>
+              <span className="flex flex-col leading-tight"><span className="text-base font-semibold">SQL Judge</span><span className="text-xs font-normal text-sidebar-foreground/60">Local workspace</span></span>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
       <SidebarContent>
+        <SidebarGroup className="pb-1">
+          <SidebarGroupContent>
+            <button
+              type="button"
+              className="flex h-[34px] w-full items-center justify-between rounded-lg border border-sidebar-border bg-sidebar px-3 text-sm text-sidebar-foreground/60 shadow-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <span className="flex items-center gap-2"><Search className="size-4" /><span>Search</span></span>
+              <kbd className="h-5 rounded-[5px] border border-sidebar-border bg-sidebar px-1.5 font-mono text-[11px] leading-5">Ctrl K</kbd>
+            </button>
+          </SidebarGroupContent>
+        </SidebarGroup>
         <SidebarGroup>
-          <SidebarGroupLabel>Workspace</SidebarGroupLabel>
+          <SidebarGroupLabel>Learn</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
               {navigation.map((item) => {
@@ -83,24 +109,35 @@ export function AppSidebar({
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
-        <SidebarGroup className="mt-auto">
-          <SidebarGroupLabel>Local workspace</SidebarGroupLabel>
+        <SidebarGroup>
+          <SidebarGroupLabel>Library</SidebarGroupLabel>
           <SidebarGroupContent>
-            <div className="rounded-lg border border-sidebar-border/70 bg-sidebar-accent/40 p-3 text-xs text-sidebar-foreground/70">
+            <NavigationItems items={libraryNavigation} activeRoute={activeRoute} />
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup>
+          <SidebarGroupLabel>Data</SidebarGroupLabel>
+          <SidebarGroupContent>
+            <NavigationItems items={dataNavigation} activeRoute={activeRoute} />
+          </SidebarGroupContent>
+        </SidebarGroup>
+        <SidebarGroup className="mt-auto">
+          <SidebarGroupContent>
+            <a href="#environments" className="block rounded-lg p-3 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent">
               <div className="flex items-center gap-2 font-medium text-sidebar-foreground">
                 <BookOpen className="size-3.5" />
-                Offline-first
+                Runtime ready
               </div>
               <p className="mt-1 leading-5">
-                Practice content and managed PostgreSQL stay on this device.
+                Local practice workspace
               </p>
-            </div>
+            </a>
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
       <SidebarFooter>
-        <div className="flex items-center gap-2 rounded-lg border border-sidebar-border/70 p-2 text-xs">
-          <ChartNoAxesColumn className="size-4 text-sidebar-foreground/60" />
+        <div className="flex items-center gap-2 rounded-lg p-2 text-xs">
+          <span className="size-2 rounded-full bg-emerald-500" />
           <div className="min-w-0">
             <p className="truncate font-medium">SQL learner</p>
             <p className="truncate text-sidebar-foreground/60">
@@ -110,5 +147,33 @@ export function AppSidebar({
         </div>
       </SidebarFooter>
     </Sidebar>
+  )
+}
+
+function NavigationItems({
+  items,
+  activeRoute,
+}: {
+  items: NavigationItem[]
+  activeRoute: AppRoute
+}) {
+  return (
+    <SidebarMenu>
+      {items.map((item) => {
+        const Icon = item.icon
+        return (
+          <SidebarMenuItem key={item.route}>
+            <SidebarMenuButton
+              render={<a href={`#${item.route}`} />}
+              isActive={activeRoute === item.route}
+              tooltip={item.label}
+            >
+              <Icon />
+              <span>{item.label}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        )
+      })}
+    </SidebarMenu>
   )
 }

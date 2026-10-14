@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SQL Judge — Progress</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sj{--bg:#ffffff;--fg:#0a0a0c;--card:#ffffff;--sidebar:#fafafa;--muted:#f4f4f5;--muted-fg:#67676f;--border:#e8e8eb;--input:#dedee3;--primary:#18181b;--primary-fg:#fafafa;--hover:#f2f2f4;--ring:#2563eb;--ok:#047857;--err:#b42318;--warn:#a15c07;--heat0:#eeeef1;--heat:#15803d;--shadow:0 1px 2px rgba(16,16,24,.05)}
+.sj.dark{--bg:#0a0a0c;--fg:#f4f4f5;--card:#111114;--sidebar:#0e0e11;--muted:#1b1b1f;--muted-fg:#a1a1aa;--border:#25252a;--input:#2f2f35;--primary:#f4f4f5;--primary-fg:#111114;--hover:#1b1b1f;--ring:#60a5fa;--ok:#4ade80;--err:#f87171;--warn:#fbbf24;--heat0:#1d1d22;--heat:#22c55e;--shadow:0 1px 2px rgba(0,0,0,.5)}
+.sj *{box-sizing:border-box}
+.sj h1,.sj h2,.sj h3,.sj p{margin:0}
+.sj a{color:inherit;text-decoration:none}
+.sj a:hover{color:inherit}
+.sj :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--fg);font-family:inherit;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer}
+.btn-outline{background:var(--card);border-color:var(--border);box-shadow:var(--shadow)}
+.btn-outline:hover,.btn-ghost:hover{background:var(--hover)}
+.btn-sm{height:32px;padding:0 10px;font-size:13px;gap:6px}
+.btn-icon{width:36px;padding:0}
+.btn-sm.btn-icon{width:32px;padding:0}
+.input{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--input);background:var(--card);color:var(--fg);font-family:inherit;font-size:14px}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:8px;font-size:14px;color:var(--fg)}
+.nav:hover{background:var(--hover)}
+.nav .i{color:var(--muted-fg)}
+.nav.on{background:var(--hover);font-weight:500}
+.nav.on .i{color:var(--fg)}
+.grp{padding:0 10px 4px;font-size:12px;font-weight:500;color:var(--muted-fg)}
+.kbd{display:inline-flex;align-items:center;height:20px;padding:0 5px;border:1px solid var(--border);border-radius:5px;background:var(--card);font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;color:var(--muted-fg)}
+.mono{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:var(--muted-fg)}
+.bar{height:6px;border-radius:999px;background:var(--muted);overflow:hidden}
+.bar span{display:block;height:100%;border-radius:999px}
+.stat{display:flex;flex-direction:column;gap:4px;padding:18px 20px}
+.stat b{font-size:26px;font-weight:600;letter-spacing:-0.02em;line-height:1.15}
+.cell{width:13px;height:13px;border-radius:3px}
+.h2{font-size:15px;font-weight:600}
+.li{display:flex;align-items:center;gap:12px;padding:11px 20px;border-top:1px solid var(--border)}
+.li:hover{background:var(--hover)}
+</style>
+</helmet>
+<div class="sj {{theme}}" style="min-height: 100vh; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--fg); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.5">
+
+  <aside aria-label="Main navigation" style="flex: 1 1 248px; display: flex; flex-direction: column; gap: 20px; padding: 14px 12px; background: var(--sidebar); border-right: 1px solid var(--border)">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 2px 6px">
+      <div class="mono" style="width: 30px; height: 30px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500">SJ</div>
+      <div style="display: flex; flex-direction: column; line-height: 1.25">
+        <span style="font-weight: 600">SQL Judge</span>
+        <span class="muted" style="font-size: 12px">Local workspace</span>
+      </div>
+    </div>
+    <button class="input" style="justify-content: space-between; height: 34px; cursor: pointer; color: var(--muted-fg)">
+      <span style="display: flex; align-items: center; gap: 8px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Search</span>
+      <span class="kbd">Ctrl K</span>
+    </button>
+    <nav style="display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Learn</div>
+        <a class="nav" href="Main.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg>Home</a>
+        <a class="nav" href="Problems.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>Problems</a>
+        <a class="nav" href="History.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>History</a>
+        <a class="nav on" href="Progress.dc.html" aria-current="page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg>Progress</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Library</div>
+        <a class="nav" href="Packs.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path><path d="m3.3 7 8.7 5 8.7-5"></path><path d="M12 22V12"></path></svg>Packs</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Data</div>
+        <a class="nav" href="Environments.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>Environments</a>
+        <a class="nav" href="Connections.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg>Connections</a>
+        <a class="nav" href="Explorer.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path><path d="M12 3v18"></path></svg>Explorer</a>
+      </div>
+    </nav>
+    <div style="flex: 1"></div>
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <a class="nav" href="Environments.dc.html" style="height: auto; padding: 8px 10px; align-items: flex-start">
+        <span style="width: 8px; height: 8px; border-radius: 999px; background: #16a34a; margin-top: 7px; flex-shrink: 0"></span>
+        <span style="display: flex; flex-direction: column; line-height: 1.35"><span style="font-size: 13px; font-weight: 500">Runtime ready</span><span class="muted" style="font-size: 12px">PostgreSQL 16.4 · local socket</span></span>
+      </a>
+      <a class="nav" href="Settings.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg>Settings</a>
+    </div>
+  </aside>
+
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--border)">
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Toggle sidebar"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg></button>
+      <div style="width: 1px; height: 16px; background: var(--border)"></div>
+      <span style="font-weight: 500">Progress</span>
+      <div style="flex: 1"></div>
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Switch theme"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg></button>
+    </header>
+
+    <main style="flex: 1; padding: 32px 40px 48px">
+      <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px">
+        <div style="display: flex; flex-direction: column; gap: 6px; margin-bottom: 4px">
+          <h1 style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2">Progress</h1>
+          <p class="muted" style="font-size: 15px">Counted from accepted submissions on this device. No account, nothing leaves your machine.</p>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 20px">
+          <section class="card" aria-labelledby="solved-h" style="flex: 1 1 420px; padding: 20px 24px; display: flex; flex-direction: column; gap: 16px">
+            <h2 id="solved-h" class="h2">Solved</h2>
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 28px">
+              <div style="position: relative; width: 120px; height: 120px; flex-shrink: 0">
+                <svg viewBox="0 0 36 36" style="width: 120px; height: 120px; transform: rotate(-90deg)" role="img" aria-label="9 of 68 problems solved">
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--muted)" stroke-width="2.6"></circle>
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--ok)" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="7.2 97.4"></circle>
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--warn)" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="4.3 97.4" stroke-dashoffset="-8.4"></circle>
+                  <circle cx="18" cy="18" r="15.5" fill="none" stroke="var(--err)" stroke-width="2.6" stroke-linecap="round" stroke-dasharray="1.4 97.4" stroke-dashoffset="-13.9"></circle>
+                </svg>
+                <div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; line-height: 1.1">
+                  <span style="font-size: 28px; font-weight: 600; letter-spacing: -0.02em">9</span>
+                  <span class="muted" style="font-size: 12px">of 68 solved</span>
+                </div>
+              </div>
+              <div style="flex: 1 1 200px; display: flex; flex-direction: column; gap: 14px; font-size: 13px">
+                <div style="display: flex; flex-direction: column; gap: 5px">
+                  <div style="display: flex; justify-content: space-between"><span style="color: var(--ok); font-weight: 500">Easy</span><span><b style="font-weight: 600">5</b><span class="muted"> / 22</span></span></div>
+                  <div class="bar"><span style="width: 23%; background: var(--ok)"></span></div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 5px">
+                  <div style="display: flex; justify-content: space-between"><span style="color: var(--warn); font-weight: 500">Medium</span><span><b style="font-weight: 600">3</b><span class="muted"> / 31</span></span></div>
+                  <div class="bar"><span style="width: 10%; background: var(--warn)"></span></div>
+                </div>
+                <div style="display: flex; flex-direction: column; gap: 5px">
+                  <div style="display: flex; justify-content: space-between"><span style="color: var(--err); font-weight: 500">Hard</span><span><b style="font-weight: 600">1</b><span class="muted"> / 15</span></span></div>
+                  <div class="bar"><span style="width: 7%; background: var(--err)"></span></div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" aria-label="Totals" style="flex: 1 1 420px; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(150px, 100%), 1fr))">
+            <div class="stat" style="border-right: 1px solid var(--border); border-bottom: 1px solid var(--border)"><span class="muted" style="font-size: 13px">Acceptance rate</span><b>41%</b><span class="muted" style="font-size: 12.5px">9 accepted of 22 submissions</span></div>
+            <div class="stat" style="border-bottom: 1px solid var(--border)"><span class="muted" style="font-size: 13px">Current streak</span><b>3 days</b><span class="muted" style="font-size: 12.5px">Longest so far: 5 days</span></div>
+            <div class="stat" style="border-right: 1px solid var(--border)"><span class="muted" style="font-size: 13px">Active days</span><b>11</b><span class="muted" style="font-size: 12.5px">in October</span></div>
+            <div class="stat"><span class="muted" style="font-size: 13px">Sample runs</span><b>57</b><span class="muted" style="font-size: 12.5px">not counted toward solved</span></div>
+          </section>
+        </div>
+
+        <section class="card" aria-labelledby="act-h" style="padding: 20px 24px; display: flex; flex-direction: column; gap: 14px">
+          <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px">
+            <h2 id="act-h" class="h2">22 submissions in the last 6 months</h2>
+            <div class="muted" style="display: flex; align-items: center; gap: 6px; font-size: 12px">Less
+              <span class="cell" style="background: var(--heat0)"></span>
+              <span class="cell" style="background: var(--heat); opacity: .35"></span>
+              <span class="cell" style="background: var(--heat); opacity: .6"></span>
+              <span class="cell" style="background: var(--heat)"></span>More</div>
+          </div>
+          <div style="overflow-x: auto">
+            <div style="display: inline-flex; flex-direction: column; gap: 6px">
+              <div class="muted" style="display: flex; font-size: 12px">
+                <span style="width: 69px">May</span><span style="width: 69px">Jun</span><span style="width: 69px">Jul</span><span style="width: 85px">Aug</span><span style="width: 69px">Sep</span><span>Oct</span>
+              </div>
+              <div role="img" aria-label="Daily submission activity, last 26 weeks" style="display: flex; gap: 3px">
+                <sc-for list="{{weeks}}" as="w" hint-placeholder-count="26">
+                  <div style="display: flex; flex-direction: column; gap: 3px">
+                    <sc-for list="{{w.days}}" as="d" hint-placeholder-count="7">
+                      <span class="cell" style="{{d.style}}"></span>
+                    </sc-for>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+          <section class="card" aria-labelledby="topic-h" style="flex: 1 1 420px; padding: 20px 24px; display: flex; flex-direction: column; gap: 14px">
+            <div style="display: flex; justify-content: space-between; align-items: baseline">
+              <h2 id="topic-h" class="h2">By topic</h2>
+              <span class="muted" style="font-size: 12.5px">solved / total</span>
+            </div>
+            <sc-for list="{{topics}}" as="t" hint-placeholder-count="6">
+              <div style="display: grid; grid-template-columns: 140px 1fr 52px; align-items: center; gap: 12px; font-size: 13px">
+                <span>{{t.name}}</span>
+                <div class="bar"><span style="{{t.style}}"></span></div>
+                <span class="mono muted" style="text-align: right">{{t.label}}</span>
+              </div>
+            </sc-for>
+            <a href="Problems.dc.html" style="margin-top: 4px; padding: 12px 14px; border-radius: 8px; background: var(--muted); font-size: 13px; display: flex; justify-content: space-between; align-items: center; gap: 12px">
+              <span><span class="muted">Room to grow in window functions. Try </span><span style="font-weight: 500">Top 3 products per category</span></span>
+              <svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg>
+            </a>
+          </section>
+
+          <section class="card" aria-labelledby="recent-h" style="flex: 1 1 420px; overflow: hidden">
+            <div style="display: flex; justify-content: space-between; align-items: baseline; padding: 18px 20px 12px">
+              <h2 id="recent-h" class="h2">Recently accepted</h2>
+              <a class="muted" href="History.dc.html" style="font-size: 13px; font-weight: 500">All history</a>
+            </div>
+            <a class="li" href="Solve.dc.html"><svg class="i" viewBox="0 0 24 24" style="color: var(--ok)" role="img" aria-label="Accepted"><path d="M20 6 9 17l-5-5"></path></svg><span style="flex: 1; font-weight: 500">Department headcount by year</span><span style="color: var(--ok); font-size: 13px">Easy</span><span class="muted" style="font-size: 13px; width: 84px; text-align: right">1 h ago</span></a>
+            <a class="li" href="Solve.dc.html"><svg class="i" viewBox="0 0 24 24" style="color: var(--ok)" role="img" aria-label="Accepted"><path d="M20 6 9 17l-5-5"></path></svg><span style="flex: 1; font-weight: 500">Customers with no orders</span><span style="color: var(--ok); font-size: 13px">Easy</span><span class="muted" style="font-size: 13px; width: 84px; text-align: right">3 days ago</span></a>
+            <a class="li" href="Solve.dc.html"><svg class="i" viewBox="0 0 24 24" style="color: var(--ok)" role="img" aria-label="Accepted"><path d="M20 6 9 17l-5-5"></path></svg><span style="flex: 1; font-weight: 500">Employees above department average</span><span style="color: var(--ok); font-size: 13px">Easy</span><span class="muted" style="font-size: 13px; width: 84px; text-align: right">3 days ago</span></a>
+            <a class="li" href="Solve.dc.html"><svg class="i" viewBox="0 0 24 24" style="color: var(--ok)" role="img" aria-label="Accepted"><path d="M20 6 9 17l-5-5"></path></svg><span style="flex: 1; font-weight: 500">Latest order per customer</span><span style="color: var(--warn); font-size: 13px">Medium</span><span class="muted" style="font-size: 13px; width: 84px; text-align: right">5 days ago</span></a>
+            <a class="li" href="Solve.dc.html"><svg class="i" viewBox="0 0 24 24" style="color: var(--ok)" role="img" aria-label="Accepted"><path d="M20 6 9 17l-5-5"></path></svg><span style="flex: 1; font-weight: 500">Salary bands by job level</span><span style="color: var(--warn); font-size: 13px">Medium</span><span class="muted" style="font-size: 13px; width: 84px; text-align: right">Last week</span></a>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const op = ['', '.35', '.6', '1'];
+    const weeks = [];
+    for (let w = 0; w < 26; w++) {
+      const days = [];
+      for (let d = 0; d < 7; d++) {
+        const x = (w * 7 + d) * 2654435761 % 97;
+        let lvl = 0;
+        if (w > 14) { lvl = x < 30 ? 1 : x < 42 ? 2 : x < 48 ? 3 : 0; }
+        else if (w > 8) { lvl = x < 10 ? 1 : x < 14 ? 2 : 0; }
+        if (w === 25 && d > 2) lvl = 0;
+        const style = lvl === 0 ? 'background: var(--heat0)' : 'background: var(--heat); opacity: ' + op[lvl];
+        days.push({ style });
+      }
+      weeks.push({ days });
+    }
+    const t = [['Joins', 3, 8], ['Aggregation', 4, 12], ['Subqueries', 1, 6], ['Window functions', 1, 14], ['CTEs', 0, 9], ['Gaps and islands', 0, 4]];
+    const topics = t.map((r) => ({ name: r[0], label: r[1] + ' / ' + r[2], style: 'width: ' + Math.max(2, Math.round(r[1] / r[2] * 100)) + '%; background: var(--fg)' }));
+    return { theme: (this.props.dark ?? false) ? 'dark' : 'light', weeks, topics };
+  }
+}
+</script>
+</body>
+</html>

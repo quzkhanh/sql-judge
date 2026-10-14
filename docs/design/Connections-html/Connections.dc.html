@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SQL Judge — Connections</title>
+<script src="./vendor/react.js"></script>
+<script src="./vendor/react-dom.js"></script>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&amp;family=Geist+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sj{--bg:#ffffff;--fg:#0a0a0c;--card:#ffffff;--sidebar:#fafafa;--muted:#f4f4f5;--muted-fg:#67676f;--border:#e8e8eb;--input:#dedee3;--primary:#18181b;--primary-fg:#fafafa;--hover:#f2f2f4;--ring:#2563eb;--ok:#047857;--ok-bg:#ecfdf3;--err:#b42318;--err-bg:#fef3f2;--shadow:0 1px 2px rgba(16,16,24,.05)}
+.sj.dark{--bg:#0a0a0c;--fg:#f4f4f5;--card:#111114;--sidebar:#0e0e11;--muted:#1b1b1f;--muted-fg:#a1a1aa;--border:#25252a;--input:#2f2f35;--primary:#f4f4f5;--primary-fg:#111114;--hover:#1b1b1f;--ring:#60a5fa;--ok:#4ade80;--ok-bg:#0f2a1c;--err:#f87171;--err-bg:#2e1515;--shadow:0 1px 2px rgba(0,0,0,.5)}
+.sj *{box-sizing:border-box}
+.sj h1,.sj h2,.sj h3,.sj p{margin:0}
+.sj a{color:inherit;text-decoration:none}
+.sj a:hover{color:inherit}
+.sj :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;height:36px;padding:0 14px;border-radius:8px;border:1px solid transparent;background:transparent;color:var(--fg);font-family:inherit;font-size:14px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer}
+.btn-primary{background:var(--primary);color:var(--primary-fg)}
+.sj .btn-primary:hover{opacity:.88;color:var(--primary-fg)}
+.btn-outline{background:var(--card);border-color:var(--border);box-shadow:var(--shadow)}
+.btn-outline:hover,.btn-ghost:hover{background:var(--hover)}
+.btn-sm{height:32px;padding:0 10px;font-size:13px;gap:6px}
+.btn-icon{width:36px;padding:0}
+.btn-sm.btn-icon{width:32px;padding:0}
+.badge{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:999px;border:1px solid var(--border);background:var(--card);color:var(--fg);font-size:12px;font-weight:500;white-space:nowrap}
+.input{display:flex;align-items:center;gap:8px;width:100%;height:36px;padding:0 12px;border-radius:8px;border:1px solid var(--input);background:var(--card);color:var(--fg);font-family:inherit;font-size:14px;box-shadow:var(--shadow)}
+input.input::placeholder{color:var(--muted-fg)}
+.card{background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:var(--shadow)}
+.nav{display:flex;align-items:center;gap:10px;height:34px;padding:0 10px;border-radius:8px;font-size:14px;color:var(--fg)}
+.nav:hover{background:var(--hover)}
+.nav .i{color:var(--muted-fg)}
+.nav.on{background:var(--hover);font-weight:500}
+.nav.on .i{color:var(--fg)}
+.grp{padding:0 10px 4px;font-size:12px;font-weight:500;color:var(--muted-fg)}
+.kbd{display:inline-flex;align-items:center;height:20px;padding:0 5px;border:1px solid var(--border);border-radius:5px;background:var(--card);font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;color:var(--muted-fg)}
+.mono{font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace}
+.muted{color:var(--muted-fg)}
+.tabs{display:inline-flex;gap:2px;padding:3px;border-radius:10px;background:var(--muted)}
+.tab{display:inline-flex;align-items:center;height:30px;padding:0 14px;border:0;border-radius:7px;background:transparent;color:var(--muted-fg);font-family:inherit;font-size:13px;font-weight:500;cursor:pointer}
+.tab.on{background:var(--card);color:var(--fg);box-shadow:var(--shadow)}
+.f{display:flex;flex-direction:column;gap:6px}
+.f > span:first-child{font-size:13.5px;font-weight:500}
+.fs{display:flex;flex-direction:column;gap:16px;padding:22px 24px;border-top:1px solid var(--border)}
+.fs h3{font-size:14px;font-weight:600}
+.prof{display:flex;align-items:center;gap:12px;width:100%;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:var(--fg);font-family:inherit;text-align:left;cursor:pointer}
+.prof:hover{background:var(--hover)}
+.prof.on{background:var(--hover)}
+.eng{width:32px;height:32px;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0;background:var(--muted);color:var(--muted-fg)}
+</style>
+</helmet>
+<div class="sj {{theme}}" style="min-height: 100vh; display: flex; flex-wrap: wrap; background: var(--bg); color: var(--fg); font-family: 'Geist', ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.5">
+
+  <aside aria-label="Main navigation" style="flex: 1 1 248px; display: flex; flex-direction: column; gap: 20px; padding: 14px 12px; background: var(--sidebar); border-right: 1px solid var(--border)">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 2px 6px">
+      <div class="mono" style="width: 30px; height: 30px; border-radius: 8px; background: var(--primary); color: var(--primary-fg); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 500">SJ</div>
+      <div style="display: flex; flex-direction: column; line-height: 1.25">
+        <span style="font-weight: 600">SQL Judge</span>
+        <span class="muted" style="font-size: 12px">Local workspace</span>
+      </div>
+    </div>
+    <button class="input" style="justify-content: space-between; height: 34px; cursor: pointer; color: var(--muted-fg); box-shadow: none">
+      <span style="display: flex; align-items: center; gap: 8px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Search</span>
+      <span class="kbd">Ctrl K</span>
+    </button>
+    <nav style="display: flex; flex-direction: column; gap: 18px">
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Learn</div>
+        <a class="nav" href="Main.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path><path d="M9 22V12h6v10"></path></svg>Home</a>
+        <a class="nav" href="Problems.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"></path><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"></path></svg>Problems</a>
+        <a class="nav" href="History.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path><path d="M12 7v5l4 2"></path></svg>History</a>
+        <a class="nav" href="Progress.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3v18h18"></path><path d="M18 17V9"></path><path d="M13 17V5"></path><path d="M8 17v-3"></path></svg>Progress</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Library</div>
+        <a class="nav" href="Packs.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"></path><path d="m3.3 7 8.7 5 8.7-5"></path><path d="M12 22V12"></path></svg>Packs</a>
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 2px">
+        <div class="grp">Data</div>
+        <a class="nav" href="Environments.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg>Environments</a>
+        <a class="nav on" href="Connections.dc.html" aria-current="page"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-5"></path><path d="M9 8V2"></path><path d="M15 8V2"></path><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"></path></svg>Connections</a>
+        <a class="nav" href="Explorer.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M3 9h18"></path><path d="M3 15h18"></path><path d="M12 3v18"></path></svg>Explorer</a>
+      </div>
+    </nav>
+    <div style="flex: 1"></div>
+    <div style="display: flex; flex-direction: column; gap: 2px">
+      <a class="nav" href="Environments.dc.html" style="height: auto; padding: 8px 10px; align-items: flex-start">
+        <span style="width: 8px; height: 8px; border-radius: 999px; background: #16a34a; margin-top: 7px; flex-shrink: 0"></span>
+        <span style="display: flex; flex-direction: column; line-height: 1.35"><span style="font-size: 13px; font-weight: 500">Runtime ready</span><span class="muted" style="font-size: 12px">PostgreSQL 16.4 · local socket</span></span>
+      </a>
+      <a class="nav" href="Settings.dc.html"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M20 7h-9"></path><path d="M14 17H5"></path><circle cx="17" cy="17" r="3"></circle><circle cx="7" cy="7" r="3"></circle></svg>Settings</a>
+    </div>
+  </aside>
+
+  <div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+    <header style="height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 20px; border-bottom: 1px solid var(--border)">
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Toggle sidebar"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg></button>
+      <div style="width: 1px; height: 16px; background: var(--border)"></div>
+      <span style="font-weight: 500">Connections</span>
+      <div style="flex: 1"></div>
+      <button class="btn btn-ghost btn-sm btn-icon" aria-label="Switch theme"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z"></path></svg></button>
+    </header>
+
+    <main style="flex: 1; padding: 32px 40px 48px">
+      <div style="max-width: 1120px; margin: 0 auto; display: flex; flex-direction: column; gap: 24px">
+        <div style="display: flex; flex-direction: column; gap: 6px">
+          <h1 style="font-size: 26px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.2">Connections</h1>
+          <p class="muted" style="font-size: 15px; max-width: 66ch">Read-only profiles for browsing your own PostgreSQL and SQL Server databases. SQL Judge never writes to them, resets them or judges on them.</p>
+        </div>
+
+        <div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+
+          <section aria-label="Saved profiles" style="flex: 1 1 280px; min-width: 0; display: flex; flex-direction: column; gap: 12px">
+            <button class="btn btn-outline" style="justify-content: flex-start"><svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New profile</button>
+            <div class="card" style="padding: 6px; display: flex; flex-direction: column; gap: 2px">
+              <button class="prof on" aria-current="true">
+                <span class="eng" style="background: #eef3ff; color: #1d4ed8">PG</span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35"><span style="font-weight: 500">Analytics replica</span><span class="muted" style="font-size: 12.5px">db.internal:5432</span></span>
+                <span style="width: 8px; height: 8px; border-radius: 999px; background: #16a34a" role="img" aria-label="Connected"></span>
+              </button>
+              <button class="prof">
+                <span class="eng" style="background: #fdf0ef; color: #a1271b">MS</span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35"><span style="font-weight: 500">Staging HR</span><span class="muted" style="font-size: 12.5px">sql-stg:1433</span></span>
+                <span class="muted" style="font-size: 12px">Not tested</span>
+              </button>
+              <button class="prof">
+                <span class="eng" style="background: #eef3ff; color: #1d4ed8">PG</span>
+                <span style="flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.35"><span style="font-weight: 500">Old warehouse</span><span style="font-size: 12.5px; color: var(--err)">Certificate not trusted</span></span>
+                <span style="width: 8px; height: 8px; border-radius: 999px; background: var(--err)" role="img" aria-label="Failed"></span>
+              </button>
+            </div>
+            <div style="display: flex; gap: 10px; padding: 12px 14px; border-radius: 10px; background: var(--muted); font-size: 13px">
+              <svg class="i muted" viewBox="0 0 24 24" aria-hidden="true" style="margin-top: 2px"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+              <span class="muted">Passwords live in your system keychain. They're never shown again, written to logs or included in backups.</span>
+            </div>
+          </section>
+
+          <section class="card" aria-labelledby="pf-h" style="flex: 3 1 560px; min-width: 0; overflow: hidden">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 20px 24px">
+              <div style="display: flex; flex-direction: column; gap: 2px">
+                <h2 id="pf-h" style="font-size: 17px; font-weight: 600">Analytics replica</h2>
+                <span class="muted" style="font-size: 13px">PostgreSQL 15.6 · last checked 4 min ago</span>
+              </div>
+              <a class="btn btn-outline btn-sm" href="Explorer.dc.html">Open in Explorer<svg class="i" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></a>
+            </div>
+
+            <div class="fs">
+              <h3>Server</h3>
+              <div class="f"><span>Engine</span>
+                <div class="tabs" role="radiogroup" aria-label="Engine" style="align-self: flex-start">
+                  <button class="tab on" role="radio" aria-checked="true">PostgreSQL</button>
+                  <button class="tab" role="radio" aria-checked="false">SQL Server</button>
+                </div>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(140px, 100%), 1fr)); gap: 14px">
+                <label class="f" style="grid-column: span 2"><span>Host</span><input class="input mono" value="db.internal" style="font-size: 13.5px"></label>
+                <label class="f"><span>Port</span><input class="input mono" value="5432" style="font-size: 13.5px"></label>
+              </div>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 14px">
+                <label class="f"><span>Database</span><input class="input mono" value="analytics" style="font-size: 13.5px"></label>
+                <label class="f"><span>Display name</span><input class="input" value="Analytics replica"></label>
+              </div>
+              <button class="btn btn-ghost btn-sm muted" style="align-self: flex-start; padding: 0 6px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Fill from a connection URL</button>
+            </div>
+
+            <div class="fs">
+              <h3>Sign in</h3>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 14px">
+                <label class="f"><span>Username</span><input class="input mono" value="readonly_dung" style="font-size: 13.5px"></label>
+                <div class="f"><span>Password</span>
+                  <div class="input" style="justify-content: space-between; background: var(--muted); box-shadow: none">
+                    <span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px" class="muted"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px"><rect width="18" height="11" x="3" y="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>Saved in keychain</span>
+                    <button class="btn btn-ghost btn-sm" style="height: 26px; padding: 0 8px">Replace</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="fs">
+              <h3>Security</h3>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr)); gap: 14px">
+                <div class="f"><span>TLS</span>
+                  <button class="input" style="justify-content: space-between; cursor: pointer">Verify certificate and host<svg class="i muted" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button>
+                </div>
+                <div class="f"><span>Access</span>
+                  <div class="input" style="background: var(--muted); box-shadow: none; font-size: 13.5px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 14px; height: 14px; color: var(--ok)"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"></path></svg>Read-only, always</div>
+                </div>
+              </div>
+            </div>
+
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 16px 24px; border-top: 1px solid var(--border); background: var(--sidebar)">
+              <span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ok); flex: 1 1 240px"><svg class="i" viewBox="0 0 24 24" aria-hidden="true" style="width: 15px; height: 15px"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Connected in 84 ms · read-only session confirmed</span>
+              <button class="btn btn-ghost" style="color: var(--err)">Delete</button>
+              <button class="btn btn-outline">Test connection</button>
+              <button class="btn btn-primary">Save changes</button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"$preview":{"width":1440,"height":1000}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { theme: (this.props.dark ?? false) ? 'dark' : 'light' };
+  }
+}
+</script>
+</body>
+</html>

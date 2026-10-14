@@ -203,6 +203,23 @@ fn session_decodes_typed_rows_and_nulls() {
 }
 
 #[test]
+fn session_decodes_numeric_rows_as_decimal_values() {
+    let server = TestServer::start();
+    let mut session =
+        PostgresSession::connect(&server.connection_string()).expect("connect runner");
+
+    let result = session
+        .execute(
+            "SELECT 12.50::numeric AS amount",
+            QueryLimits::new(2_000, 10, 64 * 1024),
+        )
+        .expect("execute numeric query");
+
+    assert_eq!(result.columns[0].logical_type, LogicalType::Numeric);
+    assert_eq!(result.rows[0][0], SqlValue::Decimal("12.50".to_owned()));
+}
+
+#[test]
 fn external_explorer_tests_connection_metadata_and_bounded_select() {
     let server = TestServer::start();
     let mut explorer = ExternalPostgresExplorer::connect(ExternalPostgresConfig {
