@@ -8,8 +8,6 @@ import {
   Package,
   Plug,
   Search,
-  SlidersHorizontal,
-  Table2,
   type LucideIcon,
 } from "lucide-react"
 
@@ -27,8 +25,6 @@ export type AppRoute =
   | "progress"
   | "packs"
   | "connections"
-  | "explorer"
-  | "settings"
 
 type NavigationItem = {
   route: AppRoute
@@ -55,7 +51,6 @@ const navigationGroups: Array<{ label: string; items: NavigationItem[] }> = [
     items: [
       { route: "environments", label: "Environments", icon: Database },
       { route: "connections", label: "Connections", icon: Plug },
-      { route: "explorer", label: "Explorer", icon: Table2 },
     ],
   },
 ]
@@ -131,10 +126,6 @@ export function AppSidebar({
             <span className="text-xs text-muted-foreground">{indicator.detail}</span>
           </span>
         </a>
-        <NavLink
-          item={{ route: "settings", label: "Settings", icon: SlidersHorizontal }}
-          active={activeRoute === "settings"}
-        />
       </nav>
     </Sidebar>
   )

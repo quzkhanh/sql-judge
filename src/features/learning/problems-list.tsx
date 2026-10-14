@@ -18,13 +18,10 @@ import {
   DropdownMenuRadioItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { hashParams, problemHref } from "@/app-route-state"
-import { useAppSettings } from "@/lib/app-settings"
 import { cn } from "@/lib/utils"
 import type { InstalledPack, SubmissionHistorySummary } from "@/lib/judge-api"
-import { type LearningProblem, type ProblemDifficulty } from "./catalog"
+import { catalogProblemKey, type LearningProblem, type ProblemDifficulty } from "./catalog"
 import {
-  catalogKeyFor,
   matchesStatus,
   problemProgress,
   progressTotals,
@@ -70,6 +67,10 @@ const statusOptions: Array<{ value: StatusFilter; label: string }> = [
   { value: "unattempted", label: "Not attempted" },
 ]
 
+function progressKey(packId: string, version: string, digest: string, problemId: string) {
+  return catalogProblemKey({ packId, version, digest }, problemId)
+}
+
 const designCard = "rounded-xl border bg-card shadow-xs-design"
 const outlineButton =
   "inline-flex h-9 items-center justify-center gap-2 rounded-lg border bg-card px-3.5 text-sm leading-none font-medium whitespace-nowrap shadow-xs-design outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:cursor-not-allowed disabled:opacity-45"
@@ -77,6 +78,10 @@ const smallIconButton =
   "inline-flex size-8 items-center justify-center rounded-lg border border-transparent text-[13px] font-medium outline-none hover:bg-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-45"
 const focusRing =
   "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+
+function solveHref(problemId: string) {
+  return `#solve/${encodeURIComponent(problemId)}`
+}
 
 export function ProblemsList({
   packs,
@@ -93,11 +98,9 @@ export function ProblemsList({
   error: string | null
   onRetry: () => void
 }) {
-  const { compactTables } = useAppSettings()
-  const rowPadding = compactTables ? "py-2" : "py-3.5"
   const [query, setQuery] = useState("")
   const [topic, setTopic] = useState("all")
-  const [packId, setPackId] = useState(() => hashParams(window.location.hash).get("pack") ?? "all")
+  const [packId, setPackId] = useState("all")
   const [difficulty, setDifficulty] = useState<ProblemDifficulty | "all">("all")
   const [status, setStatus] = useState<StatusFilter>("all")
   const [topicsExpanded, setTopicsExpanded] = useState(false)
@@ -106,7 +109,7 @@ export function ProblemsList({
   const searchRef = useRef<HTMLInputElement>(null)
 
   const topics = useMemo(() => topicCounts(problems), [problems])
-  const progress = useMemo(() => problemProgress(history, catalogKeyFor), [history])
+  const progress = useMemo(() => problemProgress(history, progressKey), [history])
   const totals = useMemo(() => progressTotals(problems, progress), [problems, progress])
   const filtered = useMemo(
     () =>
@@ -154,7 +157,7 @@ export function ProblemsList({
   function openRandomProblem() {
     const problem = filtered[Math.floor(Math.random() * filtered.length)]
     if (problem) {
-      window.location.hash = problemHref(problem.id)
+      window.location.hash = solveHref(problem.id)
     }
   }
 
@@ -328,13 +331,13 @@ export function ProblemsList({
                           const topicsText = problem.topics.map(topicLabel).join(", ")
                           return (
                             <tr key={problem.id} className="border-b transition-colors last:border-b-0 hover:bg-hover">
-                              <td className={cn(rowPadding, "pr-2 pl-5 align-middle")}>
+                              <td className="py-3.5 pr-2 pl-5 align-middle">
                                 <StatusIcon status={entry?.status} />
                               </td>
-                              <td className={cn(rowPadding, "min-w-0 px-3 align-middle")}>
+                              <td className="min-w-0 px-3 py-3.5 align-middle">
                                 <a
                                   className={cn("block truncate font-medium underline-offset-3 hover:underline", focusRing)}
-                                  href={problemHref(problem.id)}
+                                  href={solveHref(problem.id)}
                                   title={problem.title}
                                 >
                                   {problemNumbers.get(problem.id)}. {problem.title}
@@ -344,12 +347,12 @@ export function ProblemsList({
                                   {topicsText ? <span className="text-muted-foreground/70"> · {topicsText}</span> : null}
                                 </div>
                               </td>
-                              <td className={cn(rowPadding, "px-3 align-middle")}>
+                              <td className="px-3 py-3.5 align-middle">
                                 <span className={cn("font-medium", difficultyColors[problem.difficulty])}>
                                   {difficultyLabels[problem.difficulty]}
                                 </span>
                               </td>
-                              <td className={cn(rowPadding, "pr-5 pl-3 align-middle text-[13px]")}>
+                              <td className="py-3.5 pr-5 pl-3 align-middle text-[13px]">
                                 {entry ? (
                                   <>
                                     <div className="truncate">{verdictShortLabel(entry.last.verdict)}</div>

@@ -197,12 +197,6 @@ export type DeleteManagedEnvironmentRequest = {
   confirmed: boolean
 }
 
-export type SubmissionTestSummary = {
-  testId: string
-  verdict: string
-  elapsedMs: number
-}
-
 export type SubmissionHistorySummary = {
   submissionId: string
   packId: string
@@ -213,9 +207,6 @@ export type SubmissionHistorySummary = {
   policyVersion: string
   verdict: string
   createdAt: string
-  /** Records saved before ADR-024 are submissions. */
-  mode: "run" | "submit"
-  tests: SubmissionTestSummary[]
 }
 
 export type PackImportResult = {
@@ -248,9 +239,6 @@ export type BackupSnapshot = {
     policyVersion: string
     verdict: string
     createdAt: string
-    problemId?: string | null
-    /** Present only for sample runs (ADR-024). */
-    mode?: "run"
     tests: Array<{
       testId: string
       verdict: string

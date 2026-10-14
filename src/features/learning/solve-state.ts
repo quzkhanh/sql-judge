@@ -1,8 +1,23 @@
 import type {
   JudgeRunResult,
   JudgeTestResult,
+  JudgeVerdict,
   ManagedEnvironmentSummary,
 } from "@/lib/judge-api"
+
+export type VerdictTone = "ok" | "err" | "warn" | "muted"
+
+const verdicts: Record<JudgeVerdict, { label: string; tone: VerdictTone }> = {
+  Accepted: { label: "Accepted", tone: "ok" },
+  WrongAnswer: { label: "Wrong answer", tone: "err" },
+  SyntaxError: { label: "Syntax error", tone: "err" },
+  RuntimeError: { label: "Runtime error", tone: "err" },
+  TimeLimitExceeded: { label: "Time limit exceeded", tone: "warn" },
+  ResultLimitExceeded: { label: "Result limit exceeded", tone: "warn" },
+  PolicyViolation: { label: "Policy violation", tone: "err" },
+  Cancelled: { label: "Cancelled", tone: "muted" },
+  JudgeError: { label: "Judge error", tone: "warn" },
+}
 
 export function adjacentProblems<T extends { id: string }>(
   problems: T[],
@@ -33,6 +48,17 @@ export function resultSummary(result: JudgeRunResult) {
     plural(result.columns.length, "column"),
     duration,
   ].join(" · ")
+}
+
+export function verdictPresentation(
+  result: Pick<JudgeRunResult, "status" | "verdict">
+) {
+  if (result.status === "completed" && result.verdict) {
+    return verdicts[result.verdict]
+  }
+  return result.status === "unavailable"
+    ? { label: "Runner unavailable", tone: "warn" as const }
+    : verdicts.JudgeError
 }
 
 export function environmentForProblem(

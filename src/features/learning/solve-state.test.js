@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { adjacentProblems, resultSummary } from "./solve-state"
-import { verdictPresentation } from "./verdict-display"
+import { adjacentProblems, resultSummary, verdictPresentation } from "./solve-state"
 
 describe("solve state", () => {
   test("finds neighbouring problems in catalog order", () => {

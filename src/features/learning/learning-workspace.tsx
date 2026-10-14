@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 
-import { currentSettings } from "@/lib/app-settings"
 import {
   cancelJudge,
   listInstalledPacks,
@@ -17,7 +16,7 @@ import {
   canJudgeProblem,
   type LearningProblem,
 } from "./catalog"
-import { createDraftStore, localDraftPersistence } from "./draft-store"
+import { createDraftStore } from "./draft-store"
 import {
   beginJudgeRequest,
   isCurrentJudgeRequest,
@@ -33,10 +32,7 @@ import { sqlCompletionItems } from "./sql-completions"
 const MAX_SQL_LENGTH = 65_536
 
 // Drafts outlive the workspace so leaving Solve for the list and coming back keeps them (AC-002).
-const sessionDrafts = createDraftStore(
-  MAX_SQL_LENGTH,
-  localDraftPersistence(() => currentSettings().keepDrafts)
-)
+const sessionDrafts = createDraftStore(MAX_SQL_LENGTH)
 
 const missingProblem: LearningProblem = {
   id: "",

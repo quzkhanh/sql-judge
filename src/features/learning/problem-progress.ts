@@ -1,6 +1,5 @@
 import type { JudgeVerdict, ProblemDifficulty } from "@/lib/judge-api"
-import { catalogProblemKey } from "./catalog"
-import { isJudgeVerdict, verdictPresentation } from "./verdict-display"
+import { verdictPresentation } from "./solve-state"
 
 const MINUTE = 60_000
 const HOUR = 60 * MINUTE
@@ -22,7 +21,6 @@ type HistoryEntry = {
   problemId: string | null
   verdict: string
   createdAt: string
-  mode?: "run" | "submit"
 }
 
 export function submittedAtMs(createdAt: string) {
@@ -47,8 +45,7 @@ export function relativeTime(at: number, now: number) {
   return months === 1 ? "last month" : `${months} months ago`
 }
 
-// Legacy submissions without a problem id cannot be attributed and are skipped;
-// sample runs (ADR-024) never count toward solved or attempted.
+// Legacy submissions without a problem id cannot be attributed and are skipped.
 export function problemProgress(
   history: HistoryEntry[],
   keyFor: (packId: string, version: string, digest: string, problemId: string) => string
@@ -56,7 +53,7 @@ export function problemProgress(
   const progress = new Map<string, ProblemProgress>()
   for (const entry of history) {
     const at = submittedAtMs(entry.createdAt)
-    if (!entry.problemId || at === undefined || entry.mode === "run") {
+    if (!entry.problemId || at === undefined) {
       continue
     }
     const key = keyFor(entry.packId, entry.packVersion, entry.packHash, entry.problemId)
@@ -78,9 +75,9 @@ const shortVerdicts: Partial<Record<JudgeVerdict, string>> = {
 
 export function verdictShortLabel(verdict: string) {
   return (
-    (isJudgeVerdict(verdict)
-      ? (shortVerdicts[verdict] ?? verdictPresentation({ status: "completed", verdict }).label)
-      : verdict)
+    shortVerdicts[verdict as JudgeVerdict] ??
+    verdictPresentation({ status: "completed", verdict: verdict as JudgeVerdict })?.label ??
+    verdict
   )
 }
 
@@ -114,26 +111,4 @@ export function progressTotals(
     }
   }
   return totals
-}
-
-export function catalogKeyFor(packId: string, version: string, digest: string, problemId: string) {
-  return catalogProblemKey({ packId, version, digest }, problemId)
-}
-
-export function historyProblemKey(
-  entry: Pick<HistoryEntry, "packId" | "packVersion" | "packHash" | "problemId">
-) {
-  return entry.problemId
-    ? catalogKeyFor(entry.packId, entry.packVersion, entry.packHash, entry.problemId)
-    : null
-}
-
-export function resumeProblemId(progress: Map<string, Pick<ProblemProgress, "status" | "last">>) {
-  let latest: [string, number] | null = null
-  for (const [key, { status, last }] of progress) {
-    if (status === "attempted" && (!latest || last.at > latest[1])) {
-      latest = [key, last.at]
-    }
-  }
-  return latest?.[0] ?? null
 }
