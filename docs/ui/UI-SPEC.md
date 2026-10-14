@@ -1,38 +1,34 @@
-# UI Specification — preserve agmmnn/tauri-ui Vite starter
+# UI Specification — SQL Judge design contract
 
-## Fixed foundation
-The user already selected `Vite`, `Starter dashboard`, `Size optimization`, `Invoke example`, `Release workflow`, preset `b0`; release artifacts: Windows NSIS+Portable, macOS arm64/x64 DMG, Linux AppImage+DEB. **Do not regenerate or replace UI scaffold**. Maintain its native desktop defaults, theme provider, external-link handling, debug panel, and upstream shadcn/ui components. Inspect repo `package.json`, `src/`, `src-tauri/`, existing icons and CI before applying any code changes.
+## Source of truth
 
-## Navigation IA
-Left sidebar: Dashboard, Problems, Workspace, Environments, Connections, Packs, Submissions, Settings. Existing dashboard stays accessible and can be adapted to progress. Avoid replacing entire dashboard with new bespoke component library.
+`docs/design/SQL Judge — UI redesign.html` is the application-wide visual contract. Matching exports under `docs/design/` are screen-level contracts. Their declared values define layout, tokens, spacing, typography, radii, borders, shadows and states. Reimplement them with the existing Vite, React, Tailwind and shadcn/ui system. Do not ship copied export markup, vendor React bundles or export runtime scripts.
 
-## Core views
-- **Dashboard**: solved count, daily study progress, recent submissions, recommended topics, DB runtime status.
-- **Problems**: filters (dialect/difficulty/tags/solved), list, empty state, search and pagination.
-- **Problem Detail/Workspace**: resizable panes: left statement + schema + sample; right Monaco query editor; bottom bounded results/diffs/status; actions Run and Submit clearly distinct; persisted draft per problem. Keyboard shortcuts must not interfere with browser/WebView/accessibility.
-- **Connections**: saved profiles without secrets, engine toggle PG/MSSQL, host/port/db/user, TLS mode, credentials through native secure path, Test Connection (read-only), technical errors scrubbed.
-- **Environments**: managed/external badges, owned env states, Create/Reset/Rebuild/Clone/Delete; dangerous actions only on managed with typed confirmation and impact summary. Disabled buttons explain WHY.
-- **Packs**: drop `.sqljudge.zip`, import progress/stages, parser errors with filenames/JSON paths, detected dialect/version/hash, review before install; reference/sample tests run in disposable DB.
-- **Submissions**: status, elapsed, pass count, per-test category, stable link, hidden fixture content never disclosed; trace ID for error reports.
-- **Settings**: local PG runtime health, safe limits within caps, appearance, backups excluding credentials, accessibility, diagnostics.
+## Required references
 
-## Interaction states
-For EVERY asynchronous page: idle, loading, empty, success, recoverable error, permission-denied, offline/unavailable, cancellation. Do not conflate SQL compile error, fixture error, authentication error and fatal engine error. Use skeleton/placeholder UI consistent with shadcn.
+| Surface | Reference |
+| --- | --- |
+| Shell and shared tokens | `SQL Judge — UI redesign.html` |
+| Home | `Home/Main.dc.html` |
+| Problems | `Problems-html/Problems.dc.html`, `Problems (dark)-html/Problems.dc.html` |
+| Solve | `Solve — sample run (dark)-html/Solve.dc.html`, `Solve — submit verdict-html/Solve.dc.html` |
+| Packs/import | `Packs-html/Packs.dc.html`, `Import review-html/ImportPack.dc.html` |
+| Environments/reset | `Environments-html/Environments.dc.html`, `Reset confirmation-html/ResetDialog.dc.html` |
+| History/Progress | `History-html/History.dc.html`, `Progress-html/Progress.dc.html` |
+| Connections/Explorer/Settings | `Connections-html/Connections.dc.html`, `Explorer-html/Explorer.dc.html`, `Settings-html/Settings.dc.html` |
 
-## Visual and accessibility requirements
-- Reuse existing shadcn components/tokens; no new global palette/theme overriding b0 without review.
-- Accessible names for all fields/buttons; focus visible; use icons + text for verdict; not colors alone.
-- Keyboard-only problem selection and run/submit flow; scalable text and resilient layout from 1024px wide desktop to high resolution.
-- SQL editor should be labeled with instructions; ensure screen-reader usable fallback and accessible Results table.
-- Show engine/dialect near editor to avoid sending T-SQL to PG or vice versa.
-- Password field never autofills into logs or persisted component state beyond session.
+## Shell requirements
 
-## Typed IPC conventions
-Create feature-local hooks calling `src/lib/tauri-api.ts` typed wrapper; Tauri commands must validate boundaries even when frontend uses Zod. No direct SQL driver from JS/WebView and no direct filesystem read of arbitrary user-selected path. Progress events keyed by `submissionId`, unsubscribe on unmount, recover via stored state after restart.
+- Home is the default route.
+- Desktop sidebar is 248px; header is 56px. Navigation groups are Learn, Library and Data.
+- Primary controls are 36px tall with 14px horizontal padding, 8px gap and 8px radius. Small controls are 32px tall with 10px horizontal padding.
+- Use exact light/dark tokens from the export. Prefer Geist and Geist Mono when locally available; retain installed offline font fallback otherwise.
+- Change a shared primitive only after reviewing all callers. Otherwise use a scoped override.
 
-## UI acceptance examples
-- Keyboard-only user can choose problem, edit SQL, Run, Submit, inspect verdict.
-- User on external MSSQL profile never sees working Reset; direct forged IPC reset is also denied by backend.
-- Password is never displayed after save; wrong TLS certificate yields actionable error.
-- Import errors show exact manifest path; no partial install remains.
-- Existing generated release workflow and dashboard are unchanged unless a measured incremental task needs modification.
+## Behavior, accessibility and safety
+
+Every screen must match its artboard while preserving typed IPC, keyboard navigation, visible focus, responsive behavior, loading/empty/error/cancelled states, no color-only verdicts and all database safety invariants. UI fidelity never permits secret display, external destructive action, frontend-only ownership checks or false success state.
+
+## Visual verification
+
+Before checking a frontend task: inspect the application and screen export; render at the artboard viewport and supported responsive widths; reconcile visible token, geometry, typography, spacing, state and focus differences; record comparison evidence. A passing build or source review alone does not establish design fidelity.
