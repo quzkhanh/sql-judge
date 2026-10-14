@@ -5,7 +5,7 @@ use judge_core::{
 };
 use std::sync::mpsc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 #[derive(Debug, Clone)]
 pub struct JudgeCase<'a> {
@@ -22,6 +22,8 @@ pub struct TestOutcome {
     pub id: String,
     pub verdict: Verdict,
     pub mismatch: Option<ComparisonMismatch>,
+    /// Wall-clock time of the user's query for this fixture; 0 when it did not run.
+    pub elapsed_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +36,7 @@ pub struct SubmissionReport {
 struct FixtureExecution {
     reference: Result<QueryResult, QueryExecutionError>,
     user: Option<Result<QueryResult, QueryExecutionError>>,
+    user_elapsed_ms: u64,
 }
 
 pub fn judge_submission(
@@ -144,11 +147,21 @@ fn judge_submission_inner(
                     }
                     None => session.execute(case.reference_sql, case.limits),
                 };
+                let user_started = Instant::now();
                 let user = reference.as_ref().ok().map(|_| match cancellation {
                     Some(token) => session.execute_with_cancel(user_sql, case.limits, token),
                     None => session.execute(user_sql, case.limits),
                 });
-                Ok(FixtureExecution { reference, user })
+                let user_elapsed_ms = if user.is_some() {
+                    u64::try_from(user_started.elapsed().as_millis()).unwrap_or(u64::MAX)
+                } else {
+                    0
+                };
+                Ok(FixtureExecution {
+                    reference,
+                    user,
+                    user_elapsed_ms,
+                })
             },
         );
 
@@ -160,11 +173,15 @@ fn judge_submission_inner(
             };
         }
 
+        let elapsed_ms = execution
+            .as_ref()
+            .map_or(0, |execution| execution.user_elapsed_ms);
         let outcome = match execution {
             Err(_) => TestOutcome {
                 id: case.id.to_owned(),
                 verdict: Verdict::JudgeError,
                 mismatch: None,
+                elapsed_ms,
             },
             Ok(FixtureExecution {
                 reference: Err(_), ..
@@ -172,18 +189,22 @@ fn judge_submission_inner(
                 id: case.id.to_owned(),
                 verdict: Verdict::JudgeError,
                 mismatch: None,
+                elapsed_ms,
             },
             Ok(FixtureExecution {
                 reference: Ok(_),
                 user: Some(Err(error)),
+                ..
             }) => TestOutcome {
                 id: case.id.to_owned(),
                 verdict: user_error_verdict(error),
                 mismatch: None,
+                elapsed_ms,
             },
             Ok(FixtureExecution {
                 reference: Ok(expected),
                 user: Some(Ok(actual)),
+                ..
             }) => {
                 if preview.is_none() {
                     preview = Some(actual.clone());
@@ -197,15 +218,18 @@ fn judge_submission_inner(
                         Verdict::WrongAnswer
                     },
                     mismatch: comparison.mismatch,
+                    elapsed_ms,
                 }
             }
             Ok(FixtureExecution {
                 reference: Ok(_),
                 user: None,
+                ..
             }) => TestOutcome {
                 id: case.id.to_owned(),
                 verdict: Verdict::JudgeError,
                 mismatch: None,
+                elapsed_ms,
             },
         };
         tests.push(outcome);

@@ -40,7 +40,7 @@ bun run tauri dev
 cargo fmt --all -- --check
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
-python3 scripts/validate_pack.py examples/packs/hr-sql-101
+python3 scripts/validate_pack.py examples/packs/hr-analytics
 ```
 If no Cargo workspace exists yet, use `cargo test --manifest-path src-tauri/Cargo.toml`; if no JS test script exists, add one through an approved task, don't claim a nonexistent `bun test` suite.
 

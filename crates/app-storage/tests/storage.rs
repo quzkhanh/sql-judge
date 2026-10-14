@@ -15,6 +15,7 @@ fn record(id: &str) -> SubmissionRecord {
         policy_version: "policy-v1".to_owned(),
         verdict: "Accepted".to_owned(),
         created_at: "2026-10-12T00:00:00Z".to_owned(),
+        problem_id: Some("above-average".to_owned()),
     }
 }
 
@@ -87,6 +88,161 @@ fn environment_identity_columns_migrate_existing_metadata() {
     assert!(legacy.pack_version.is_empty());
     assert!(legacy.pack_digest.is_empty());
     drop(environments);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn submission_problem_id_column_migrates_legacy_history() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-history-problem-migration-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let connection = Connection::open(&path).expect("open legacy database");
+    connection
+        .execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY CHECK (version = 1));
+             INSERT INTO schema_version(version) VALUES (1);
+             CREATE TABLE submissions (
+                 submission_id TEXT PRIMARY KEY NOT NULL,
+                 pack_id TEXT NOT NULL,
+                 pack_version TEXT NOT NULL,
+                 pack_hash TEXT NOT NULL,
+                 engine_version TEXT NOT NULL,
+                 policy_version TEXT NOT NULL,
+                 verdict TEXT NOT NULL,
+                 created_at TEXT NOT NULL
+             );
+             CREATE TABLE submission_tests (
+                 submission_id TEXT NOT NULL REFERENCES submissions(submission_id) ON DELETE CASCADE,
+                 test_id TEXT NOT NULL,
+                 verdict TEXT NOT NULL,
+                 elapsed_ms INTEGER NOT NULL CHECK (elapsed_ms >= 0),
+                 PRIMARY KEY (submission_id, test_id)
+             );
+             INSERT INTO submissions VALUES ('legacy', 'hr-sql-101', '1.0.0', 'sha256:legacy',
+                 'postgresql-managed', 'policy-v1', 'Accepted', '2026-10-01T00:00:00Z');
+             INSERT INTO submission_tests VALUES ('legacy', 'basic', 'Accepted', 3);",
+        )
+        .expect("create legacy history schema");
+    drop(connection);
+
+    {
+        let mut history = HistoryStore::open(&path).expect("migrate history store");
+        history
+            .save_submission(&record("submission-new"), &[test_record("basic")])
+            .expect("save submission with problem id");
+    }
+    let history = HistoryStore::open(&path).expect("reopen migrated history");
+    let submissions = history.list_submissions().expect("list submissions");
+    let legacy = submissions
+        .iter()
+        .find(|submission| submission.submission_id == "legacy")
+        .expect("legacy submission survives");
+    assert_eq!(legacy.problem_id, None);
+    assert_eq!(legacy.verdict, "Accepted");
+    let current = submissions
+        .iter()
+        .find(|submission| submission.submission_id == "submission-new")
+        .expect("new submission");
+    assert_eq!(current.problem_id.as_deref(), Some("above-average"));
+    assert_eq!(history.test_count("legacy").expect("legacy tests"), 1);
+    drop(history);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn submission_problem_id_must_be_a_valid_problem_identifier() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-history-problem-validation-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let mut history = HistoryStore::open(&path).expect("open history");
+    for invalid in [
+        "",
+        " ",
+        "Above Average",
+        "../above-average",
+        &"a".repeat(81),
+    ] {
+        let mut submission = record("submission-invalid-problem");
+        submission.problem_id = Some(invalid.to_owned());
+        assert!(
+            history.save_submission(&submission, &[]).is_err(),
+            "{invalid:?} must be rejected"
+        );
+    }
+    let mut legacy = record("submission-without-problem");
+    legacy.problem_id = None;
+    history
+        .save_submission(&legacy, &[])
+        .expect("problem id stays optional");
+    assert_eq!(
+        history.list_submissions().expect("list submissions")[0].problem_id,
+        None
+    );
+    drop(history);
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn legacy_backup_without_problem_id_restores_and_new_backup_keeps_it() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-backup-problem-id-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    {
+        let mut history = HistoryStore::open(&path).expect("open history");
+        history
+            .save_submission(&record("submission-with-problem"), &[test_record("basic")])
+            .expect("save submission");
+    }
+    let snapshot = export_backup(&path).expect("export backup");
+    assert_eq!(snapshot.version, 2);
+    assert_eq!(
+        snapshot.submissions[0].problem_id.as_deref(),
+        Some("above-average")
+    );
+    let encoded = serde_json::to_string(&snapshot).expect("encode backup");
+    assert!(encoded.contains("\"problemId\":\"above-average\""));
+
+    let legacy_json = r#"{"version":2,"environments":[],"submissions":[{
+        "submissionId":"legacy-submission","packId":"hr-sql-101","packVersion":"1.0.0",
+        "packHash":"sha256:legacy","engineVersion":"postgresql-managed",
+        "policyVersion":"policy-v1","verdict":"WrongAnswer",
+        "createdAt":"2026-10-01T00:00:00Z",
+        "tests":[{"testId":"basic","verdict":"WrongAnswer","elapsedMs":4}]}]}"#;
+    let legacy: app_storage::BackupSnapshot =
+        serde_json::from_str(legacy_json).expect("legacy v2 backup parses");
+    assert_eq!(legacy.submissions[0].problem_id, None);
+    assert!(
+        !serde_json::to_string(&legacy)
+            .expect("re-encode legacy backup")
+            .contains("problemId")
+    );
+    restore_backup(&path, &legacy).expect("restore legacy backup");
+    let history = HistoryStore::open(&path).expect("reopen history");
+    let submissions = history.list_submissions().expect("list submissions");
+    assert_eq!(submissions.len(), 1);
+    assert_eq!(submissions[0].submission_id, "legacy-submission");
+    assert_eq!(submissions[0].problem_id, None);
+    drop(history);
+
+    let mut forged = snapshot.clone();
+    forged.submissions[0].problem_id = Some("Not A Problem".to_owned());
+    assert!(restore_backup(&path, &forged).is_err());
+
+    restore_backup(&path, &snapshot).expect("restore current backup");
+    let history = HistoryStore::open(&path).expect("reopen history");
+    assert_eq!(
+        history.list_submissions().expect("list submissions")[0]
+            .problem_id
+            .as_deref(),
+        Some("above-average")
+    );
+    drop(history);
     let _ = std::fs::remove_file(path);
 }
 

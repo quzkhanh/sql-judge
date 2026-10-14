@@ -157,7 +157,43 @@
             }
           }
         },
-        "starter_sql": { "type": "string", "minLength": 1, "maxLength": 65536 }
+        "starter_sql": { "type": "string", "minLength": 1, "maxLength": 65536 },
+        "sample_tables": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "rows"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                "maxLength": 128
+              },
+              "rows": {
+                "type": "array",
+                "maxItems": 20,
+                "items": {
+                  "type": "object",
+                  "maxProperties": 128,
+                  "propertyNames": {
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                    "maxLength": 128
+                  },
+                  "additionalProperties": {
+                    "anyOf": [
+                      { "type": "null" },
+                      { "type": "boolean" },
+                      { "type": "number" },
+                      { "type": "string", "maxLength": 4096 }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
       }
     },
     "tests": {

@@ -1,0 +1,21 @@
+{
+  "spec_version": "sqljudge.pack/v1",
+  "id": "hr-analytics",
+  "version": "1.2.0",
+  "title": "HR Analytics",
+  "dialect": "postgresql",
+  "min_engine_version": "15",
+  "schema": [
+    "schema/001_tables.sql"
+  ],
+  "problems": [
+    "problems/above-average/problem.json",
+    "problems/second-highest-salary/problem.json",
+    "problems/reporting-chain/problem.json",
+    "problems/duplicate-emails/problem.json",
+    "problems/headcount-by-year/problem.json",
+    "problems/top-earners-per-department/problem.json",
+    "problems/departments-without-employees/problem.json",
+    "problems/salary-gaps/problem.json"
+  ]
+}

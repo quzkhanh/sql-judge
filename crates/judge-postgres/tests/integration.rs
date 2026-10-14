@@ -433,6 +433,9 @@ fn orchestrator_accepts_equivalent_window_query_and_rejects_hardcoded_rows() {
         "SELECT id AS employee_id, name AS employee_name FROM (SELECT e.*, AVG(e.salary) OVER (PARTITION BY department_id) AS average_salary FROM employees e) e WHERE salary > average_salary",
     );
     assert_eq!(accepted.verdict, Verdict::Accepted);
+    assert_eq!(accepted.tests.len(), 1);
+    assert_eq!(accepted.tests[0].id, "basic");
+    assert!(accepted.tests[0].elapsed_ms < 2_000);
 
     let rejected = judge_submission(
         &mut admin,
@@ -468,6 +471,7 @@ fn orchestrator_maps_reference_failure_to_judge_error() {
     );
 
     assert_eq!(report.verdict, Verdict::JudgeError);
+    assert_eq!(report.tests[0].elapsed_ms, 0, "user SQL never ran");
 }
 
 #[test]

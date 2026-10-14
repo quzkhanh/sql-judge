@@ -39,7 +39,7 @@ fn validated_pack_exposes_exact_problem_judge_inputs() {
         .expect("problem exists");
 
     assert_eq!(problem.id, "above-average");
-    assert_eq!(problem.tests.len(), 3);
+    assert_eq!(problem.tests.len(), 4);
     assert_eq!(problem.tests[0].id, "basic");
     assert!(problem.schema_sql.contains("CREATE TABLE"));
     assert!(problem.reference_sql.contains("SELECT"));
@@ -251,7 +251,7 @@ fn publish_conflict_does_not_provision_a_managed_schema() {
 }
 
 fn sample_path() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/packs/hr-sql-101")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/packs/hr-analytics")
 }
 
 fn copy_sample() -> (tempfile_like::TempDir, PathBuf) {
@@ -318,14 +318,87 @@ fn sample_pack_passes_strict_structural_validation() {
 }
 
 #[test]
-fn checked_in_cte_pack_passes_strict_structural_validation() {
-    let archive = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("../../examples/postgresql-cte-junior-middle-20.sqljudge.zip");
-
-    PackData::from_path(archive)
-        .expect("load checked-in CTE pack")
+fn checked_in_zip_matches_the_sample_pack_directory() {
+    let archive =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hr-analytics.sqljudge.zip");
+    let from_zip = PackData::from_path(archive)
+        .expect("load checked-in zip")
         .validate()
-        .expect("checked-in CTE pack must satisfy the v1 contract");
+        .expect("checked-in zip must satisfy the v1 contract");
+    let from_directory = PackData::from_directory(sample_path())
+        .expect("load checked-in directory")
+        .validate()
+        .expect("checked-in directory must satisfy the v1 contract");
+    assert_eq!(from_zip.digest(), from_directory.digest());
+    assert_eq!(from_zip.id(), "hr-analytics");
+    assert_eq!(from_zip.version(), "1.2.0");
+}
+
+#[test]
+fn sample_pack_catalog_matches_the_solve_design_example() {
+    let catalog = PackData::from_directory(sample_path())
+        .expect("load sample pack")
+        .validate()
+        .expect("validate sample pack")
+        .catalog_entry()
+        .expect("catalog entry");
+    assert_eq!(catalog.title, "HR Analytics");
+    assert_eq!(catalog.problems.len(), 8);
+    assert!(catalog.problems.iter().all(|problem| {
+        problem.fixture_count >= 3
+            && !problem.sample_rows.is_empty()
+            && !problem.sample_tables.is_empty()
+            && problem.starter_sql.is_some()
+    }));
+    let encoded = serde_json::to_value(&catalog).expect("encode catalog");
+    let second = encoded["problems"]
+        .as_array()
+        .expect("problems")
+        .iter()
+        .find(|problem| problem["id"] == "second-highest-salary")
+        .expect("second highest salary problem");
+    assert_eq!(second["title"], "Second highest salary per department");
+    assert_eq!(second["difficulty"], "medium");
+    assert_eq!(
+        second["topics"],
+        serde_json::json!(["window-functions", "ranking"])
+    );
+    assert_eq!(
+        second["outputColumns"],
+        serde_json::json!([
+            {"name": "department_name", "type": "text"},
+            {"name": "second_salary", "type": "numeric"}
+        ])
+    );
+    assert_eq!(second["rowOrder"], "unordered");
+    assert_eq!(second["timeLimitMs"], 2000);
+    assert_eq!(second["fixtureCount"], 4);
+    assert_eq!(
+        second["sampleTables"],
+        serde_json::json!([
+            {"name": "employees", "rows": [
+                {"id": 1, "name": "Linh", "department_id": 1, "salary": 135000},
+                {"id": 2, "name": "Minh", "department_id": 1, "salary": 120000},
+                {"id": 3, "name": "Hoa", "department_id": 1, "salary": 120000},
+                {"id": 4, "name": "Quan", "department_id": 2, "salary": 98000},
+                {"id": 5, "name": "Trang", "department_id": 3, "salary": 87000},
+                {"id": 6, "name": "Bao", "department_id": 3, "salary": 72000}
+            ]},
+            {"name": "departments", "rows": [
+                {"id": 1, "name": "Engineering"},
+                {"id": 2, "name": "Finance"},
+                {"id": 3, "name": "Design"}
+            ]}
+        ])
+    );
+    assert_eq!(
+        second["sampleRows"],
+        serde_json::json!([
+            {"department_name": "Engineering", "second_salary": 120000},
+            {"department_name": "Finance", "second_salary": null},
+            {"department_name": "Design", "second_salary": 72000}
+        ])
+    );
 }
 
 #[test]
@@ -380,7 +453,7 @@ fn registry_lookup_returns_the_validated_schema_for_an_imported_non_default_pack
 #[test]
 fn sample_zip_pack_passes_strict_structural_validation() {
     let archive =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hr-sql-101.sqljudge.zip");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hr-analytics.sqljudge.zip");
     let data = PackData::from_zip(&archive).expect("load sample zip pack");
     data.validate().expect("validate sample zip pack");
 }
@@ -394,7 +467,7 @@ fn pack_path_loader_accepts_directory_and_zip_sources() {
         .expect("validate directory source");
 
     let archive =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hr-sql-101.sqljudge.zip");
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/hr-analytics.sqljudge.zip");
     PackData::from_path(&archive)
         .expect("load zip source")
         .validate()
@@ -670,6 +743,59 @@ fn validated_catalog_exposes_non_default_pack_problem_metadata_only() {
 }
 
 #[test]
+fn catalog_starter_sql_allows_newlines_and_tabs_only() {
+    for accepted in [
+        "SELECT e.id\nFROM employees AS e;",
+        "SELECT e.id\r\nFROM employees AS e\r\n\tWHERE e.id > 0;",
+    ] {
+        let (_temp, pack) = copy_sample();
+        rewrite_above_average(&pack, |problem| {
+            problem["catalog"]["starter_sql"] = serde_json::json!(accepted);
+        });
+        assert_eq!(
+            above_average_catalog(&pack)["starterSql"],
+            serde_json::json!(accepted)
+        );
+    }
+    for rejected in [
+        "SELECT 1\u{0000}",
+        "SELECT 1\rFROM employees",
+        "SELECT 1\u{001b}[31m",
+        "SELECT 1\u{000b}",
+        "SELECT 1\u{0085}",
+    ] {
+        let (_temp, pack) = copy_sample();
+        rewrite_above_average(&pack, |problem| {
+            problem["catalog"]["starter_sql"] = serde_json::json!(rejected);
+        });
+        assert!(
+            matches!(
+                PackData::from_directory(&pack)
+                    .expect("load pack")
+                    .validate(),
+                Err(PackError::InvalidManifest(_))
+            ),
+            "{rejected:?} must be rejected"
+        );
+    }
+}
+
+#[test]
+fn catalog_sample_strings_still_reject_newlines() {
+    let (_temp, pack) = copy_sample();
+    rewrite_above_average(&pack, |problem| {
+        problem["catalog"]["sample_rows"] =
+            serde_json::json!([{"employee_id": 1, "employee_name": "Linh\nTran"}]);
+    });
+    assert!(matches!(
+        PackData::from_directory(&pack)
+            .expect("load pack")
+            .validate(),
+        Err(PackError::InvalidManifest(_))
+    ));
+}
+
+#[test]
 fn invalid_catalog_metadata_is_rejected_before_publication() {
     let (_temp, pack) = copy_sample();
     let problem_path = pack.join("problems/above-average/problem.json");
@@ -690,6 +816,166 @@ fn invalid_catalog_metadata_is_rejected_before_publication() {
         .validate()
         .expect_err("nested sample values must not cross the catalog boundary");
     assert!(matches!(error, PackError::InvalidManifest(_)));
+}
+
+fn rewrite_above_average(pack: &Path, change: impl FnOnce(&mut serde_json::Value)) {
+    let problem_path = pack.join("problems/above-average/problem.json");
+    let mut problem: serde_json::Value =
+        serde_json::from_slice(&fs::read(&problem_path).expect("read problem"))
+            .expect("parse problem");
+    change(&mut problem);
+    fs::write(
+        problem_path,
+        serde_json::to_vec(&problem).expect("encode problem"),
+    )
+    .expect("write problem");
+}
+
+fn above_average_catalog(pack: &Path) -> serde_json::Value {
+    let catalog = PackData::from_directory(pack)
+        .expect("load pack")
+        .validate()
+        .expect("structural validation")
+        .catalog_entry()
+        .expect("catalog entry");
+    let encoded = serde_json::to_value(&catalog).expect("encode catalog");
+    encoded["problems"]
+        .as_array()
+        .expect("problems array")
+        .iter()
+        .find(|problem| problem["id"] == "above-average")
+        .expect("above-average problem")
+        .clone()
+}
+
+#[test]
+fn catalog_entry_exposes_display_metadata_and_bounded_sample_tables() {
+    let (_temp, pack) = copy_sample();
+    rewrite_above_average(&pack, |problem| {
+        problem["limits"]["statement_timeout_ms"] = serde_json::json!(1500);
+        problem["catalog"]["sample_tables"] = serde_json::json!([
+            {"name": "departments", "rows": [{"id": 1, "name": "Engineering"}]},
+            {"name": "employees", "rows": [
+                {"id": 1, "name": "Linh", "department_id": 1, "salary": 135000},
+                {"id": 2, "name": "Minh", "department_id": 1, "salary": null}
+            ]}
+        ]);
+    });
+
+    let problem = above_average_catalog(&pack);
+    assert_eq!(
+        problem["outputColumns"],
+        serde_json::json!([
+            {"name": "employee_id", "type": "integer"},
+            {"name": "employee_name", "type": "text"}
+        ])
+    );
+    assert_eq!(problem["rowOrder"], "unordered");
+    assert_eq!(problem["timeLimitMs"], 1500);
+    assert_eq!(problem["fixtureCount"], 4);
+    assert_eq!(
+        problem["sampleTables"],
+        serde_json::json!([
+            {"name": "departments", "rows": [{"id": 1, "name": "Engineering"}]},
+            {"name": "employees", "rows": [
+                {"id": 1, "name": "Linh", "department_id": 1, "salary": 135000},
+                {"id": 2, "name": "Minh", "department_id": 1, "salary": null}
+            ]}
+        ])
+    );
+    let encoded = problem.to_string();
+    assert!(!encoded.contains("INSERT"));
+    assert!(!encoded.contains("tests/"));
+}
+
+#[test]
+fn catalog_sample_tables_default_to_empty() {
+    let (_temp, pack) = copy_sample();
+    rewrite_above_average(&pack, |problem| {
+        problem["catalog"]
+            .as_object_mut()
+            .expect("catalog object")
+            .remove("sample_tables");
+    });
+    assert_eq!(
+        above_average_catalog(&pack)["sampleTables"],
+        serde_json::json!([])
+    );
+}
+
+#[test]
+fn invalid_catalog_sample_tables_are_rejected() {
+    let row = serde_json::json!({"id": 1, "name": "Engineering"});
+    let too_many_tables = (0..9)
+        .map(|index| serde_json::json!({"name": format!("t{index}"), "rows": []}))
+        .collect::<Vec<_>>();
+    let cases = vec![
+        (
+            "too many rows",
+            serde_json::json!([{"name": "departments", "rows": vec![row.clone(); 21]}]),
+            false,
+        ),
+        ("too many tables", serde_json::json!(too_many_tables), true),
+        (
+            "unknown table",
+            serde_json::json!([{"name": "salaries", "rows": [row.clone()]}]),
+            false,
+        ),
+        (
+            "invalid table name",
+            serde_json::json!([{"name": "bad-name", "rows": [row.clone()]}]),
+            true,
+        ),
+        (
+            "duplicate table",
+            serde_json::json!([
+                {"name": "departments", "rows": []},
+                {"name": "departments", "rows": []}
+            ]),
+            false,
+        ),
+        (
+            "nested value",
+            serde_json::json!([{"name": "departments", "rows": [{"id": {"nested": 1}}]}]),
+            false,
+        ),
+        (
+            "invalid column key",
+            serde_json::json!([{"name": "departments", "rows": [{"bad key": 1}]}]),
+            false,
+        ),
+    ];
+    for (label, sample_tables, drop_schema) in cases {
+        let (_temp, pack) = copy_sample();
+        rewrite_above_average(&pack, |problem| {
+            if drop_schema {
+                problem["catalog"]
+                    .as_object_mut()
+                    .expect("catalog object")
+                    .remove("schema");
+            }
+            problem["catalog"]["sample_tables"] = sample_tables;
+        });
+        let result = PackData::from_directory(&pack)
+            .expect("load pack")
+            .validate();
+        assert!(
+            matches!(result, Err(PackError::InvalidManifest(_))),
+            "{label} must be rejected as an invalid manifest, got {result:?}"
+        );
+    }
+
+    let (_temp, pack) = copy_sample();
+    rewrite_above_average(&pack, |problem| {
+        problem["catalog"]["sample_tables"] =
+            serde_json::json!([{"name": "departments", "rows": [], "evil": true}]);
+    });
+    assert!(matches!(
+        PackData::from_directory(&pack)
+            .expect("load pack")
+            .validate(),
+        Err(PackError::InvalidJson { .. })
+    ));
 }
 
 #[test]
