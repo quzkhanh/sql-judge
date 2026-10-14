@@ -1,7 +1,7 @@
 import type { JudgeRunResult, JudgeVerdict } from "@/lib/judge-api"
 
 type VerdictSource = Pick<JudgeRunResult, "status" | "verdict">
-export type VerdictTone = "ok" | "err" | "warn"
+export type VerdictTone = "ok" | "err" | "warn" | "muted"
 
 const verdicts: Record<JudgeVerdict, { label: string; tone: VerdictTone }> = {
   Accepted: { label: "Accepted", tone: "ok" },
@@ -11,8 +11,17 @@ const verdicts: Record<JudgeVerdict, { label: string; tone: VerdictTone }> = {
   PolicyViolation: { label: "Policy violation", tone: "warn" },
   TimeLimitExceeded: { label: "Time limit exceeded", tone: "warn" },
   ResultLimitExceeded: { label: "Result limit exceeded", tone: "warn" },
-  Cancelled: { label: "Cancelled", tone: "warn" },
+  Cancelled: { label: "Cancelled", tone: "muted" },
   JudgeError: { label: "Judge error", tone: "warn" },
+}
+
+export function verdictPresentation(result: VerdictSource) {
+  if (result.status === "completed" && result.verdict) {
+    return verdicts[result.verdict]
+  }
+  return result.status === "unavailable"
+    ? { label: "Runner unavailable", tone: "warn" as const }
+    : verdicts.JudgeError
 }
 
 export function verdictLabel(result: VerdictSource) {

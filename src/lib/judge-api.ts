@@ -39,11 +39,19 @@ export type JudgeRunRequest = {
   requestId?: string
 }
 
+export type JudgeTestResult = {
+  id: string
+  verdict: JudgeVerdict
+  elapsedMs: number
+  hidden: boolean
+}
+
 export type JudgeRunResult = {
   status: "completed" | "unavailable" | "error"
   verdict?: JudgeVerdict
   columns?: Array<{ name: string; type: string }>
   rows?: Array<Array<string | number | boolean | null>>
+  tests?: JudgeTestResult[]
   durationMs: number
   message: string
 }
@@ -139,6 +147,11 @@ export type ManagedPackSummary = {
   digest: string
 }
 
+export type CatalogSampleTable = {
+  name: string
+  rows: Array<Record<string, CatalogSampleValue>>
+}
+
 export type InstalledProblem = {
   id: string
   title: string
@@ -149,6 +162,11 @@ export type InstalledProblem = {
   schema: CatalogTable[]
   sampleRows: Array<Record<string, CatalogSampleValue>>
   starterSql: string | null
+  outputColumns: Array<{ name: string; type: string }>
+  rowOrder: "ordered" | "unordered"
+  timeLimitMs: number
+  fixtureCount: number
+  sampleTables: CatalogSampleTable[]
 }
 
 export type InstalledPack = {
@@ -190,13 +208,12 @@ export type SubmissionHistorySummary = {
   packId: string
   packVersion: string
   packHash: string
+  problemId: string | null
   engineVersion: string
   policyVersion: string
   verdict: string
   createdAt: string
-  /** Null for records saved before problem tracking existed. */
-  problemId: string | null
-  /** Records saved before run tracking existed are submissions. */
+  /** Records saved before ADR-024 are submissions. */
   mode: "run" | "submit"
   tests: SubmissionTestSummary[]
 }
@@ -210,8 +227,7 @@ export type PackImportResult = {
 }
 
 export type BackupSnapshot = {
-  /** Version 3 adds per-submission problemId/mode; version 2 files still restore. */
-  version: 2 | 3
+  version: 2
   environments: Array<{
     envId: string
     instanceId: string
@@ -233,7 +249,8 @@ export type BackupSnapshot = {
     verdict: string
     createdAt: string
     problemId?: string | null
-    mode?: "run" | "submit"
+    /** Present only for sample runs (ADR-024). */
+    mode?: "run"
     tests: Array<{
       testId: string
       verdict: string

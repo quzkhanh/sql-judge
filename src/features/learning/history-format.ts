@@ -1,4 +1,4 @@
-import { relativeTime } from "./problem-status"
+import { relativeTime } from "./problem-progress"
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -34,6 +34,6 @@ export function formatTimestamp(seconds: number | null, now: number) {
 
 export function whenLabel(seconds: number | null, now: number) {
   if (seconds === null) return "Unknown time"
-  const label = relativeTime(seconds, now)
+  const label = relativeTime(seconds * 1000, now * 1000)
   return label[0].toUpperCase() + label.slice(1)
 }

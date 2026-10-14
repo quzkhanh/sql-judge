@@ -1,16 +1,16 @@
-import { Check, TriangleAlert, X } from "lucide-react"
+import { Ban, Check, TriangleAlert, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
-import { formatTimestamp, shortHash } from "./history-format"
+import { formatDuration, formatTimestamp, shortHash } from "./history-format"
 import { historyChip, type HistoryEntry } from "./history-state"
 import { historyCardClass, VerdictChip } from "./history-ui"
 import { isJudgeVerdict, verdictLabel, verdictTone } from "./verdict-display"
 
 type Props = { entry: HistoryEntry; now: number; onClose: () => void }
 
-const fixtureIcon = { ok: Check, err: X, warn: TriangleAlert }
+const fixtureIcon = { ok: Check, err: X, warn: TriangleAlert, muted: Ban }
 
 export function HistoryDetail({ entry, now, onClose }: Props) {
   const { record } = entry
@@ -58,11 +58,10 @@ export function HistoryDetail({ entry, now, onClose }: Props) {
                 >
                   <Icon className={cn("size-3.5 shrink-0", passed ? "text-ok" : tone === "err" ? "text-err" : "text-warn")} role="img" aria-label={passed ? "Passed" : "Failed"} />
                   <span className="min-w-0 flex-1 break-words">{index + 1} · {test.testId}</span>
-                  {passed ? null : (
-                    <span className={cn("font-mono", tone === "err" ? "text-err" : "text-warn")}>
-                      {verdict ? verdictLabel(source) : "Unknown verdict"}
-                    </span>
-                  )}
+                  <span className={cn("font-mono", passed ? "text-muted-foreground" : tone === "err" ? "text-err" : "text-warn")}>
+                    {passed ? "" : `${verdict ? verdictLabel(source) : "Unknown verdict"} · `}
+                    {formatDuration(test.elapsedMs)}
+                  </span>
                 </li>
               )
             })}

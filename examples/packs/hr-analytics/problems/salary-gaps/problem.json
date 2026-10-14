@@ -1,0 +1,179 @@
+{
+  "id": "salary-gaps",
+  "title": "Salary gap to the previous hire",
+  "difficulty": "medium",
+  "topics": [
+    "window-functions"
+  ],
+  "statement": "Within each department, order employees by `hired_on` and then by `id` to break ties. For every employee with a non-`NULL` salary, return `employee_id`, `employee_name`, and `salary_gap`: their salary minus the salary of the **previous** employee in that order. Employees with a `NULL` salary are left out entirely and are skipped when finding the previous employee. The first employee of each department has a `NULL` gap. Any row order is accepted.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "employee_id",
+        "type": "integer"
+      },
+      {
+        "name": "employee_name",
+        "type": "text"
+      },
+      {
+        "name": "salary_gap",
+        "type": "numeric"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 2000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "catalog": {
+    "schema": [
+      {
+        "name": "departments",
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer"
+          },
+          {
+            "name": "name",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "name": "employees",
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer"
+          },
+          {
+            "name": "name",
+            "type": "text"
+          },
+          {
+            "name": "email",
+            "type": "text"
+          },
+          {
+            "name": "department_id",
+            "type": "integer"
+          },
+          {
+            "name": "manager_id",
+            "type": "integer",
+            "nullable": true
+          },
+          {
+            "name": "salary",
+            "type": "numeric",
+            "nullable": true
+          },
+          {
+            "name": "hired_on",
+            "type": "date"
+          }
+        ]
+      }
+    ],
+    "sample_rows": [
+      {
+        "employee_id": 1,
+        "employee_name": "Linh",
+        "salary_gap": null
+      },
+      {
+        "employee_id": 2,
+        "employee_name": "Minh",
+        "salary_gap": 6000
+      },
+      {
+        "employee_id": 3,
+        "employee_name": "Hoa",
+        "salary_gap": -7500
+      },
+      {
+        "employee_id": 4,
+        "employee_name": "Quan",
+        "salary_gap": null
+      },
+      {
+        "employee_id": 5,
+        "employee_name": "Trang",
+        "salary_gap": 3000
+      }
+    ],
+    "starter_sql": "SELECT e.id AS employee_id,\n       e.name AS employee_name,\n       e.salary,\n       e.hired_on\nFROM employees AS e;",
+    "sample_tables": [
+      {
+        "name": "employees",
+        "rows": [
+          {
+            "id": 1,
+            "name": "Linh",
+            "department_id": 1,
+            "salary": 120000,
+            "hired_on": "2021-01-04"
+          },
+          {
+            "id": 2,
+            "name": "Minh",
+            "department_id": 1,
+            "salary": 126000,
+            "hired_on": "2022-03-01"
+          },
+          {
+            "id": 3,
+            "name": "Hoa",
+            "department_id": 1,
+            "salary": 118500,
+            "hired_on": "2023-06-12"
+          },
+          {
+            "id": 4,
+            "name": "Quan",
+            "department_id": 2,
+            "salary": 98000,
+            "hired_on": "2022-08-15"
+          },
+          {
+            "id": 5,
+            "name": "Trang",
+            "department_id": 2,
+            "salary": 101000,
+            "hired_on": "2024-02-01"
+          }
+        ]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "same-day-hires",
+      "file": "tests/same-day-hires.sql",
+      "hidden": true
+    },
+    {
+      "id": "null-salaries",
+      "file": "tests/null-salaries.sql",
+      "hidden": true
+    },
+    {
+      "id": "no-employees",
+      "file": "tests/no-employees.sql",
+      "hidden": true
+    }
+  ]
+}

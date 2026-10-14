@@ -3,7 +3,7 @@ import type { InstalledPack, SubmissionHistorySummary } from "@/lib/judge-api"
 
 import { catalogProblems } from "./catalog"
 import type { HistoryEntry } from "./history-state"
-import { difficultyProgress, historyProblemKey, problemStatuses } from "./problem-status"
+import { catalogKeyFor, historyProblemKey, problemProgress, progressTotals } from "./problem-progress"
 
 const RECENT_LIMIT = 5
 
@@ -15,9 +15,9 @@ export function progressSummary(
   packs: InstalledPack[]
 ) {
   const problems = catalogProblems(packs)
-  const statuses = problemStatuses(records)
+  const statuses = problemProgress(records, catalogKeyFor)
   const isSolved = (id: string) => statuses.get(id)?.status === "solved"
-  const byDifficulty = difficultyProgress(problems, statuses)
+  const byDifficulty = progressTotals(problems, statuses)
   const submits = entries.filter((entry) => entry.record.mode === "submit")
   const acceptedSubmits = submits.filter((entry) => entry.verdict === "Accepted")
 

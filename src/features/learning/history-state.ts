@@ -7,7 +7,7 @@ import type {
 } from "@/lib/judge-api"
 
 import { catalogProblems } from "./catalog"
-import { historyProblemKey } from "./problem-status"
+import { historyProblemKey } from "./problem-progress"
 import { isJudgeVerdict, verdictLabel, verdictTone, type VerdictTone } from "./verdict-display"
 
 export type HistoryTab = "all" | "submit" | "run"
@@ -75,7 +75,7 @@ export function historyEntries(
         difficulty: problem?.difficulty ?? null,
         passed: tests.filter((test) => test.verdict === "Accepted").length,
         total: tests.length,
-        elapsedMs: tests.length > 0 ? Math.max(...tests.map((test) => test.elapsedMs)) : null,
+        elapsedMs: tests.length > 0 ? tests.reduce((sum, test) => sum + test.elapsedMs, 0) : null,
       }
     })
     .sort((a, b) => (b.createdAt ?? -Infinity) - (a.createdAt ?? -Infinity))

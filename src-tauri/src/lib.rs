@@ -272,6 +272,17 @@ struct JudgeRunResult {
     rows: Vec<Vec<serde_json::Value>>,
     duration_ms: u64,
     message: String,
+    /// Per-fixture outcome only: never expected rows, fixture SQL, or mismatch details.
+    tests: Vec<JudgeTestResult>,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct JudgeTestResult {
+    id: String,
+    verdict: String,
+    elapsed_ms: u64,
+    hidden: bool,
 }
 
 #[derive(Debug, Serialize, PartialEq, Eq)]
@@ -2032,6 +2043,7 @@ fn policy_error(message: &str) -> JudgeRunResult {
         rows: Vec::new(),
         duration_ms: 0,
         message: message.to_owned(),
+        tests: Vec::new(),
     }
 }
 
@@ -2103,6 +2115,28 @@ fn sql_value_json(value: &SqlValue) -> serde_json::Value {
     }
 }
 
+/// Maps orchestrator outcomes (already in manifest order) to the IPC shape. Only the
+/// test ID, verdict name, user-query elapsed time and the manifest `hidden` flag
+/// cross the boundary; expected rows and fixture SQL stay native-only.
+fn judge_test_results(
+    problem: &ValidatedProblem,
+    outcomes: &[judge_postgres::TestOutcome],
+) -> Vec<JudgeTestResult> {
+    outcomes
+        .iter()
+        .map(|outcome| JudgeTestResult {
+            id: outcome.id.clone(),
+            verdict: verdict_name(outcome.verdict).to_owned(),
+            elapsed_ms: outcome.elapsed_ms,
+            hidden: problem
+                .tests
+                .iter()
+                .find(|test| test.id == outcome.id)
+                .is_none_or(|test| test.hidden),
+        })
+        .collect()
+}
+
 fn judge_cases(problem: &ValidatedProblem, submit: bool) -> Vec<JudgeCase<'_>> {
     problem
         .tests
@@ -2168,6 +2202,7 @@ fn judge_request(
                 rows: Vec::new(),
                 duration_ms: 0,
                 message: "Managed environment state is busy.".to_owned(),
+                tests: Vec::new(),
             };
         }
     };
@@ -2204,6 +2239,7 @@ fn judge_request(
             rows: Vec::new(),
             duration_ms: started.elapsed().as_millis() as u64,
             message: "Managed PostgreSQL runtime could not be started.".to_owned(),
+            tests: Vec::new(),
         };
     }
     let connection_string = match state.runtime.as_ref() {
@@ -2216,6 +2252,7 @@ fn judge_request(
                 rows: Vec::new(),
                 duration_ms: started.elapsed().as_millis() as u64,
                 message: "Managed PostgreSQL runtime is unavailable.".to_owned(),
+                tests: Vec::new(),
             };
         }
     };
@@ -2229,6 +2266,7 @@ fn judge_request(
                 rows: Vec::new(),
                 duration_ms: started.elapsed().as_millis() as u64,
                 message: "Managed PostgreSQL runtime connection failed.".to_owned(),
+                tests: Vec::new(),
             };
         }
     };
@@ -2243,37 +2281,44 @@ fn judge_request(
     let duration_ms = started.elapsed().as_millis() as u64;
     let verdict = verdict_name(report.verdict).to_owned();
     let (columns, rows) = preview_response(report.preview.as_ref());
-    // The judge report has no per-fixture timing, so each test records the whole run duration.
-    let tests = report
-        .tests
-        .iter()
-        .map(|test| TestRecord {
-            test_id: test.id.clone(),
-            verdict: verdict_name(test.verdict).to_owned(),
-            elapsed_ms: duration_ms,
-        })
-        .collect::<Vec<_>>();
-    let submission = SubmissionRecord {
-        submission_id: submission_id(),
-        pack_id: pack.id().to_owned(),
-        pack_version: pack.version().to_owned(),
-        pack_hash: pack.digest().to_owned(),
-        engine_version: "postgresql-managed".to_owned(),
-        policy_version: "policy-v1".to_owned(),
-        verdict: verdict.clone(),
-        created_at: created_at(),
-        problem_id: Some(problem.id.clone()),
-        mode: expected_mode.to_owned(),
-    };
-    if state.history.save_submission(&submission, &tests).is_err() {
-        return JudgeRunResult {
-            status: "error".to_owned(),
-            verdict: Some("JudgeError".to_owned()),
-            columns: Vec::new(),
-            rows: Vec::new(),
-            duration_ms,
-            message: "Judge completed but history could not be saved.".to_owned(),
+    let test_results = judge_test_results(&problem, &report.tests);
+    {
+        let tests = report
+            .tests
+            .iter()
+            .map(|test| TestRecord {
+                test_id: test.id.clone(),
+                verdict: verdict_name(test.verdict).to_owned(),
+                elapsed_ms: test.elapsed_ms,
+            })
+            .collect::<Vec<_>>();
+        let submission = SubmissionRecord {
+            submission_id: submission_id(),
+            pack_id: pack.id().to_owned(),
+            pack_version: pack.version().to_owned(),
+            pack_hash: pack.digest().to_owned(),
+            engine_version: "postgresql-managed".to_owned(),
+            policy_version: "policy-v1".to_owned(),
+            verdict: verdict.clone(),
+            created_at: created_at(),
+            problem_id: Some(problem.id.clone()),
+            mode: if expected_mode == "submit" {
+                app_storage::SubmissionMode::Submit
+            } else {
+                app_storage::SubmissionMode::Run
+            },
         };
+        if state.history.save_submission(&submission, &tests).is_err() {
+            return JudgeRunResult {
+                status: "error".to_owned(),
+                verdict: Some("JudgeError".to_owned()),
+                columns: Vec::new(),
+                rows: Vec::new(),
+                duration_ms,
+                message: "Judge completed but history could not be saved.".to_owned(),
+                tests: Vec::new(),
+            };
+        }
     }
     JudgeRunResult {
         status: "completed".to_owned(),
@@ -2282,6 +2327,7 @@ fn judge_request(
         rows,
         duration_ms,
         message: format!("{} test case(s) evaluated.", report.tests.len()),
+        tests: test_results,
     }
 }
 
@@ -2424,45 +2470,48 @@ fn inspect_managed_environment(
 fn list_submission_history(
     state: State<'_, Mutex<ManagedEnvironmentState>>,
 ) -> Result<Vec<SubmissionHistorySummary>, String> {
-    submission_history_value(state.inner())
+    list_submission_history_value(state.inner())
 }
 
-fn submission_history_value(
+fn list_submission_history_value(
     state: &Mutex<ManagedEnvironmentState>,
 ) -> Result<Vec<SubmissionHistorySummary>, String> {
     let state = state
         .lock()
         .map_err(|_| "Managed environment state is busy.".to_owned())?;
-    state
+    let records = state
         .history
         .list_submissions()
-        .map(|records| {
-            records
+        .map_err(|_| "Submission history could not be read.".to_owned())?;
+    records
+        .into_iter()
+        .map(|record| {
+            let tests = state
+                .history
+                .list_submission_tests(&record.submission_id)
+                .map_err(|_| "Submission history could not be read.".to_owned())?
                 .into_iter()
-                .map(|record| SubmissionHistorySummary {
-                    submission_id: record.submission_id,
-                    pack_id: record.pack_id,
-                    pack_version: record.pack_version,
-                    pack_hash: record.pack_hash,
-                    engine_version: record.engine_version,
-                    policy_version: record.policy_version,
-                    verdict: record.verdict,
-                    created_at: record.created_at,
-                    problem_id: record.problem_id,
-                    mode: record.mode,
-                    tests: record
-                        .tests
-                        .into_iter()
-                        .map(|test| SubmissionTestSummary {
-                            test_id: test.test_id,
-                            verdict: test.verdict,
-                            elapsed_ms: test.elapsed_ms,
-                        })
-                        .collect(),
+                .map(|test| SubmissionTestSummary {
+                    test_id: test.test_id,
+                    verdict: test.verdict,
+                    elapsed_ms: test.elapsed_ms,
                 })
-                .collect()
+                .collect();
+            Ok(SubmissionHistorySummary {
+                submission_id: record.submission_id,
+                pack_id: record.pack_id,
+                pack_version: record.pack_version,
+                pack_hash: record.pack_hash,
+                engine_version: record.engine_version,
+                policy_version: record.policy_version,
+                verdict: record.verdict,
+                created_at: record.created_at,
+                problem_id: record.problem_id,
+                mode: record.mode.as_str().to_owned(),
+                tests,
+            })
         })
-        .map_err(|_| "Submission history could not be read.".to_owned())
+        .collect()
 }
 
 #[tauri::command]
@@ -2712,7 +2761,7 @@ mod tests {
     fn install_sample_pack(state: &Mutex<super::ManagedEnvironmentState>) {
         install_pack(
             state,
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/packs/hr-sql-101"),
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/packs/hr-analytics"),
         );
     }
 
@@ -2752,7 +2801,7 @@ mod tests {
     }
 
     fn sample_pack_identity() -> (String, String) {
-        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/packs/hr-sql-101");
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/packs/hr-analytics");
         let pack = problem_pack::PackData::from_path(path)
             .expect("load sample pack")
             .validate()
@@ -2800,7 +2849,7 @@ mod tests {
         let created = create_managed_environment_value(
             CreateEnvironmentRequest {
                 env_id: "env-a".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version,
                 pack_digest,
                 namespace: "sj_env_a".to_owned(),
@@ -2894,7 +2943,7 @@ mod tests {
             create_managed_environment_value(
                 CreateEnvironmentRequest {
                     env_id: env_id.to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: pack_version.clone(),
                     pack_digest: pack_digest.clone(),
                     namespace: format!("sj_{env_id}"),
@@ -2993,7 +3042,7 @@ mod tests {
         let record = environment_manager::EnvironmentRecord {
             env_id: "env_mismatched".to_owned(),
             instance_id: "instance_mismatched".to_owned(),
-            pack_id: "hr-sql-101".to_owned(),
+            pack_id: "hr-analytics".to_owned(),
             pack_version: "1.0.0".to_owned(),
             pack_digest: "a".repeat(64),
             namespace: "sj_env_mismatched".to_owned(),
@@ -3129,7 +3178,7 @@ mod tests {
         let record = EnvironmentRecord {
             env_id: "env-unknown-provision".to_owned(),
             instance_id: state.runtime_instance_id.clone(),
-            pack_id: "hr-sql-101".to_owned(),
+            pack_id: "hr-analytics".to_owned(),
             pack_version: "1.0.0".to_owned(),
             pack_digest: "a".repeat(64),
             namespace: namespace.to_owned(),
@@ -3335,7 +3384,7 @@ mod tests {
         let record = environment_manager::EnvironmentRecord {
             env_id: "env_provision_error".to_owned(),
             instance_id: "instance_provision_error".to_owned(),
-            pack_id: "hr-sql-101".to_owned(),
+            pack_id: "hr-analytics".to_owned(),
             pack_version: "1.0.0".to_owned(),
             pack_digest: "a".repeat(64),
             namespace: "sj_env_provision_error".to_owned(),
@@ -3741,7 +3790,7 @@ mod tests {
         let result = judge_request(
             JudgeRunRequest {
                 problem_id: "above-average".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version: pack_version.clone(),
                 pack_digest: pack_digest.clone(),
                 sql: "SELECT e.id AS employee_id, e.name AS employee_name FROM employees AS e WHERE e.salary > (SELECT AVG(peer.salary) FROM employees AS peer WHERE peer.department_id = e.department_id)".to_owned(),
@@ -3763,10 +3812,19 @@ mod tests {
             vec!["employee_id", "employee_name"]
         );
         assert_eq!(result.rows.len(), 2);
+        assert_eq!(
+            serde_json::to_value(&result.tests).expect("encode run tests"),
+            serde_json::json!([{
+                "id": "basic",
+                "verdict": "Accepted",
+                "elapsedMs": result.tests[0].elapsed_ms,
+                "hidden": false
+            }])
+        );
         let submit = judge_request(
             JudgeRunRequest {
                 problem_id: "above-average".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version,
                 pack_digest,
                 sql: "SELECT 1".to_owned(),
@@ -3778,30 +3836,157 @@ mod tests {
         );
         assert_eq!(submit.status, "completed");
         assert_eq!(submit.verdict.as_deref(), Some("WrongAnswer"));
+        assert_eq!(
+            submit
+                .tests
+                .iter()
+                .map(|test| (test.id.as_str(), test.verdict.as_str(), test.hidden))
+                .collect::<Vec<_>>(),
+            vec![
+                ("basic", "WrongAnswer", false),
+                ("ties-at-average", "WrongAnswer", true),
+                ("null-salaries", "WrongAnswer", true),
+                ("empty-department", "WrongAnswer", true),
+            ]
+        );
+        let encoded = serde_json::to_value(&submit).expect("encode submit result");
+        for test in encoded["tests"].as_array().expect("tests array") {
+            let mut keys = test
+                .as_object()
+                .expect("test object")
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            keys.sort_unstable();
+            assert_eq!(keys, vec!["elapsedMs", "hidden", "id", "verdict"]);
+        }
+        let history_ipc = serde_json::to_value(
+            super::list_submission_history_value(&state).expect("history IPC"),
+        )
+        .expect("encode history");
+        assert_eq!(history_ipc[0]["problemId"], "above-average");
         let state_guard = state.lock().expect("lock history state");
         let history = state_guard
             .history
             .list_submissions()
             .expect("list submission history");
-        assert_eq!(history.len(), 2);
-        let run = history
-            .iter()
-            .find(|record| record.mode == "run")
-            .expect("sample run is recorded");
-        let submitted = history
-            .iter()
-            .find(|record| record.mode == "submit")
-            .expect("submission is recorded");
-        for record in [run, submitted] {
-            assert_eq!(record.pack_id, "hr-sql-101");
-            assert!(!record.pack_hash.is_empty());
+        assert_eq!(history.len(), 2, "the sample run and the submission");
+        assert_eq!(
+            history
+                .iter()
+                .filter(|record| record.mode == app_storage::SubmissionMode::Submit)
+                .count(),
+            1
+        );
+        for record in &history {
+            assert_eq!(record.pack_id, "hr-analytics");
             assert_eq!(record.problem_id.as_deref(), Some("above-average"));
+            assert!(!record.pack_hash.is_empty());
         }
-        assert_eq!(run.verdict, "Accepted");
-        assert_eq!(submitted.verdict, "WrongAnswer");
-        assert!(!run.tests.is_empty());
-        assert!(submitted.tests.len() > run.tests.len());
         drop(state_guard);
+        drop(state);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn native_submit_reports_per_fixture_verdicts_for_design_starter() {
+        let root = std::env::temp_dir().join(format!(
+            "sql-judge-tauri-starter-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .expect("system clock")
+                .as_nanos()
+        ));
+        std::fs::create_dir(&root).expect("create test root");
+        let mut native_state =
+            load_environment_state(&root.join("state.sqlite")).expect("load native state");
+        ensure_managed_runtime(&mut native_state).expect("start managed runtime");
+        let state = Mutex::new(native_state);
+        install_sample_pack(&state);
+        let (pack_version, pack_digest) = sample_pack_identity();
+        let catalog = list_installed_packs_value(&state).expect("list catalog");
+        let problem = catalog[0]
+            .problems
+            .iter()
+            .find(|problem| problem.id == "second-highest-salary")
+            .expect("second highest salary problem");
+        let starter = problem.starter_sql.clone().expect("starter SQL");
+        assert!(starter.contains("DENSE_RANK()") && starter.lines().count() == 14);
+        let request = |problem_id: &str, sql: &str, mode: &str| JudgeRunRequest {
+            problem_id: problem_id.to_owned(),
+            pack_id: "hr-analytics".to_owned(),
+            pack_version: pack_version.clone(),
+            pack_digest: pack_digest.clone(),
+            sql: sql.to_owned(),
+            mode: mode.to_owned(),
+            request_id: None,
+        };
+
+        let run = judge_request(
+            request("second-highest-salary", &starter, "run"),
+            &state,
+            "run",
+        );
+        assert_eq!(run.status, "completed");
+        assert_eq!(
+            run.tests
+                .iter()
+                .map(|test| (test.id.as_str(), test.hidden))
+                .collect::<Vec<_>>(),
+            vec![("basic", false)]
+        );
+
+        let submit = judge_request(
+            request("second-highest-salary", &starter, "submit"),
+            &state,
+            "submit",
+        );
+        assert_eq!(submit.verdict.as_deref(), Some("WrongAnswer"));
+        assert_eq!(
+            submit
+                .tests
+                .iter()
+                .map(|test| (test.id.as_str(), test.verdict.as_str(), test.hidden))
+                .collect::<Vec<_>>(),
+            vec![
+                ("basic", "WrongAnswer", false),
+                ("salary-ties", "WrongAnswer", true),
+                ("null-salaries", "WrongAnswer", true),
+                ("empty-department", "Accepted", true),
+            ]
+        );
+
+        let forged = judge_request(
+            request("not-in-this-pack", "SELECT 1", "submit"),
+            &state,
+            "submit",
+        );
+        assert_eq!(forged.verdict.as_deref(), Some("PolicyViolation"));
+        assert!(forged.tests.is_empty());
+        let history = super::list_submission_history_value(&state).expect("history");
+        assert_eq!(history.len(), 2, "forged problem ids are never recorded");
+        let mut modes = history
+            .iter()
+            .map(|record| (record.mode.as_str(), record.problem_id.as_deref()))
+            .collect::<Vec<_>>();
+        modes.sort_unstable();
+        assert_eq!(
+            modes,
+            vec![
+                ("run", Some("second-highest-salary")),
+                ("submit", Some("second-highest-salary")),
+            ]
+        );
+        let encoded = serde_json::to_value(&history).expect("encode history");
+        let submitted = encoded
+            .as_array()
+            .expect("history array")
+            .iter()
+            .find(|record| record["mode"] == "submit")
+            .expect("submission listed");
+        assert_eq!(submitted["tests"].as_array().expect("tests").len(), 4);
+        assert!(submitted["tests"][0]["elapsedMs"].is_u64());
         drop(state);
         let _ = std::fs::remove_dir_all(root);
     }
@@ -3824,7 +4009,7 @@ mod tests {
         let result = import_pack_value(
             ImportPackRequest {
                 path: std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("../examples/hr-sql-101.sqljudge.zip")
+                    .join("../examples/hr-analytics.sqljudge.zip")
                     .to_string_lossy()
                     .into_owned(),
             },
@@ -3833,41 +4018,8 @@ mod tests {
         .expect("import zip pack");
 
         assert_eq!(result.status, "published");
-        assert_eq!(result.pack_id, "hr-sql-101");
-        assert_eq!(result.version, "1.0.0");
-        assert!(!result.digest.is_empty());
-        drop(state);
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn native_imports_checked_in_cte_zip_after_runtime_validation() {
-        let root = std::env::temp_dir().join(format!(
-            "sql-judge-tauri-cte-import-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir(&root).expect("create test root");
-        let path = root.join("state.sqlite");
-        let mut native_state = load_environment_state(&path).expect("load native state");
-        ensure_managed_runtime(&mut native_state).expect("start managed runtime");
-        let state = Mutex::new(native_state);
-        let archive = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../examples/postgresql-cte-junior-middle-20.sqljudge.zip");
-        let result = import_pack_value(
-            ImportPackRequest {
-                path: archive.to_string_lossy().into_owned(),
-            },
-            &state,
-        )
-        .expect("import checked-in CTE zip pack");
-
-        assert_eq!(result.status, "published");
-        assert_eq!(result.pack_id, "postgresql-cte-junior-middle-20");
-        assert_eq!(result.version, "1.0.0");
+        assert_eq!(result.pack_id, "hr-analytics");
+        assert_eq!(result.version, "1.2.0");
         assert!(!result.digest.is_empty());
         drop(state);
         let _ = std::fs::remove_dir_all(root);
@@ -3893,7 +4045,7 @@ mod tests {
                 .save_environment(&environment_manager::EnvironmentRecord {
                     env_id: "unimported-env".to_owned(),
                     instance_id: "unimported-instance".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: "1.0.0".to_owned(),
                     pack_digest: "a".repeat(64),
                     namespace: "sj_unimported".to_owned(),
@@ -3927,7 +4079,7 @@ mod tests {
         install_sample_pack(&state);
         let sample_identity = {
             let guard = state.lock().expect("lock native state");
-            managed_pack_identity(&guard, "hr-sql-101").expect("sample pack identity")
+            managed_pack_identity(&guard, "hr-analytics").expect("sample pack identity")
         };
         let mut vault = MemorySecretVault::default();
         {
@@ -3937,7 +4089,7 @@ mod tests {
                 .save_environment(&environment_manager::EnvironmentRecord {
                     env_id: "backup-env".to_owned(),
                     instance_id: "backup-instance".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: sample_identity.0.clone(),
                     pack_digest: sample_identity.1.clone(),
                     namespace: "sj_backup".to_owned(),
@@ -3951,15 +4103,15 @@ mod tests {
                 .save_submission(
                     &app_storage::SubmissionRecord {
                         submission_id: "backup-submission".to_owned(),
-                        pack_id: "hr-sql-101".to_owned(),
+                        pack_id: "hr-analytics".to_owned(),
                         pack_version: "1.0.0".to_owned(),
                         pack_hash: "sha256:backup".to_owned(),
                         engine_version: "postgresql-managed".to_owned(),
                         policy_version: "policy-v1".to_owned(),
                         verdict: "Accepted".to_owned(),
                         created_at: "2026-10-12T00:00:00Z".to_owned(),
-                        problem_id: None,
-                        mode: "submit".to_owned(),
+                        problem_id: Some("above-average".to_owned()),
+                        mode: app_storage::SubmissionMode::Submit,
                     },
                     &[app_storage::TestRecord {
                         test_id: "basic".to_owned(),
@@ -4021,7 +4173,7 @@ mod tests {
         install_sample_pack(&state);
         let sample_identity = {
             let guard = state.lock().expect("lock native state");
-            managed_pack_identity(&guard, "hr-sql-101").expect("sample pack identity")
+            managed_pack_identity(&guard, "hr-analytics").expect("sample pack identity")
         };
         {
             let mut guard = state.lock().expect("lock state");
@@ -4030,7 +4182,7 @@ mod tests {
                 .save_environment(&environment_manager::EnvironmentRecord {
                     env_id: "existing-env".to_owned(),
                     instance_id: "existing-instance".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: sample_identity.0.clone(),
                     pack_digest: sample_identity.1.clone(),
                     namespace: "sj_existing".to_owned(),
@@ -4044,15 +4196,15 @@ mod tests {
                 .save_submission(
                     &app_storage::SubmissionRecord {
                         submission_id: "existing-submission".to_owned(),
-                        pack_id: "hr-sql-101".to_owned(),
+                        pack_id: "hr-analytics".to_owned(),
                         pack_version: "1.0.0".to_owned(),
                         pack_hash: "sha256:existing".to_owned(),
                         engine_version: "postgresql-managed".to_owned(),
                         policy_version: "policy-v1".to_owned(),
                         verdict: "Accepted".to_owned(),
                         created_at: "2026-10-12T00:00:00Z".to_owned(),
-                        problem_id: None,
-                        mode: "submit".to_owned(),
+                        problem_id: Some("above-average".to_owned()),
+                        mode: app_storage::SubmissionMode::Submit,
                     },
                     &[app_storage::TestRecord {
                         test_id: "basic".to_owned(),
@@ -4118,7 +4270,7 @@ mod tests {
         install_sample_pack(&state);
         let sample_identity = {
             let guard = state.lock().expect("lock native state");
-            managed_pack_identity(&guard, "hr-sql-101").expect("sample pack identity")
+            managed_pack_identity(&guard, "hr-analytics").expect("sample pack identity")
         };
         {
             let mut guard = state.lock().expect("lock state");
@@ -4127,7 +4279,7 @@ mod tests {
                 .save_environment(&environment_manager::EnvironmentRecord {
                     env_id: "existing-env".to_owned(),
                     instance_id: "existing-instance".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: sample_identity.0.clone(),
                     pack_digest: sample_identity.1.clone(),
                     namespace: "sj_existing".to_owned(),
@@ -4145,7 +4297,7 @@ mod tests {
                 .save_environment(&environment_manager::EnvironmentRecord {
                     env_id: "new-env".to_owned(),
                     instance_id: "new-instance".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: "1.0.0".to_owned(),
                     pack_digest: "a".repeat(64),
                     namespace: "sj_new".to_owned(),
@@ -4192,7 +4344,7 @@ mod tests {
         install_sample_pack(&state);
         let sample_identity = {
             let guard = state.lock().expect("lock native state");
-            managed_pack_identity(&guard, "hr-sql-101").expect("sample pack identity")
+            managed_pack_identity(&guard, "hr-analytics").expect("sample pack identity")
         };
         {
             let mut guard = state.lock().expect("lock state");
@@ -4201,7 +4353,7 @@ mod tests {
                 .save_environment(&environment_manager::EnvironmentRecord {
                     env_id: "existing-env".to_owned(),
                     instance_id: "existing-instance".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: sample_identity.0.clone(),
                     pack_digest: sample_identity.1.clone(),
                     namespace: "sj_existing".to_owned(),
@@ -4249,7 +4401,7 @@ mod tests {
                 .save_environment(&environment_manager::EnvironmentRecord {
                     env_id: "existing-env".to_owned(),
                     instance_id: "existing-instance".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: "1.0.0".to_owned(),
                     pack_digest: "a".repeat(64),
                     namespace: "sj_existing".to_owned(),
@@ -4315,86 +4467,21 @@ mod tests {
             .save_submission(
                 &app_storage::SubmissionRecord {
                     submission_id: "oversized-submission".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: "1.0.0".to_owned(),
                     pack_hash: "x".repeat(4 * 1024 * 1024),
                     engine_version: "postgresql-managed".to_owned(),
                     policy_version: "policy-v1".to_owned(),
                     verdict: "Accepted".to_owned(),
                     created_at: "2026-10-12T00:00:00Z".to_owned(),
-                    problem_id: None,
-                    mode: "submit".to_owned(),
+                    problem_id: Some("above-average".to_owned()),
+                    mode: app_storage::SubmissionMode::Submit,
                 },
                 &[],
             )
             .expect("save oversized submission");
         drop(history);
         assert!(app_storage::export_backup(&path).is_err());
-        let _ = std::fs::remove_dir_all(root);
-    }
-
-    #[test]
-    fn submission_history_lists_problem_mode_and_tests_in_camel_case() {
-        let root = std::env::temp_dir().join(format!(
-            "sql-judge-tauri-history-shape-{}-{}",
-            std::process::id(),
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .expect("system clock")
-                .as_nanos()
-        ));
-        std::fs::create_dir(&root).expect("create test root");
-        let state = Mutex::new(
-            load_environment_state(&root.join("state.sqlite")).expect("load native state"),
-        );
-        state
-            .lock()
-            .expect("lock history state")
-            .history
-            .save_submission(
-                &app_storage::SubmissionRecord {
-                    submission_id: "run-1".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
-                    pack_version: "1.0.0".to_owned(),
-                    pack_hash: "a".repeat(64),
-                    engine_version: "postgresql-managed".to_owned(),
-                    policy_version: "policy-v1".to_owned(),
-                    verdict: "WrongAnswer".to_owned(),
-                    created_at: "1760000000".to_owned(),
-                    problem_id: Some("above-average".to_owned()),
-                    mode: "run".to_owned(),
-                },
-                &[app_storage::TestRecord {
-                    test_id: "visible-example".to_owned(),
-                    verdict: "WrongAnswer".to_owned(),
-                    elapsed_ms: 6,
-                }],
-            )
-            .expect("save sample run");
-
-        let history = super::submission_history_value(&state).expect("list history");
-
-        assert_eq!(
-            serde_json::to_value(&history).expect("encode history"),
-            serde_json::json!([{
-                "submissionId": "run-1",
-                "packId": "hr-sql-101",
-                "packVersion": "1.0.0",
-                "packHash": "a".repeat(64),
-                "engineVersion": "postgresql-managed",
-                "policyVersion": "policy-v1",
-                "verdict": "WrongAnswer",
-                "createdAt": "1760000000",
-                "problemId": "above-average",
-                "mode": "run",
-                "tests": [{
-                    "testId": "visible-example",
-                    "verdict": "WrongAnswer",
-                    "elapsedMs": 6
-                }]
-            }])
-        );
-        drop(state);
         let _ = std::fs::remove_dir_all(root);
     }
 
@@ -4418,7 +4505,7 @@ mod tests {
                 .save_environment(&environment_manager::EnvironmentRecord {
                     env_id: "oversized-existing".to_owned(),
                     instance_id: "oversized-instance".to_owned(),
-                    pack_id: "hr-sql-101".to_owned(),
+                    pack_id: "hr-analytics".to_owned(),
                     pack_version: "1.0.0".to_owned(),
                     pack_digest: "a".repeat(64),
                     namespace: "sj_oversized_existing".to_owned(),
@@ -4468,7 +4555,7 @@ mod tests {
         let first = create_managed_environment_value(
             CreateEnvironmentRequest {
                 env_id: "env-a".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version,
                 pack_digest,
                 namespace: "sj_env_a".to_owned(),
@@ -4537,7 +4624,7 @@ mod tests {
         std::fs::create_dir(&root).expect("create test root");
         let pack = root.join("non-default-pack");
         copy_tree(
-            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/packs/hr-sql-101"),
+            &Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples/packs/hr-analytics"),
             &pack,
         );
         let manifest_path = pack.join("pack.json");
@@ -4600,7 +4687,7 @@ mod tests {
         let created = create_managed_environment_value(
             CreateEnvironmentRequest {
                 env_id: "env-a".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version,
                 pack_digest,
                 namespace: "sj_env_a".to_owned(),
@@ -4717,7 +4804,7 @@ mod tests {
             .save_environment(&EnvironmentRecord {
                 env_id: "env-a".to_owned(),
                 instance_id: "instance-a".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version: "1.0.0".to_owned(),
                 pack_digest: "a".repeat(64),
                 namespace: "sj_env_a".to_owned(),
@@ -4754,7 +4841,7 @@ mod tests {
             .save_environment(&EnvironmentRecord {
                 env_id: "env-rebuild".to_owned(),
                 instance_id: "instance-rebuild".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version: "1.0.0".to_owned(),
                 pack_digest: "a".repeat(64),
                 namespace: "sj_env_rebuild".to_owned(),
@@ -4767,7 +4854,7 @@ mod tests {
             .save_environment(&EnvironmentRecord {
                 env_id: "env-running".to_owned(),
                 instance_id: "instance-running".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version: "1.0.0".to_owned(),
                 pack_digest: "a".repeat(64),
                 namespace: "sj_env_running".to_owned(),
@@ -4780,7 +4867,7 @@ mod tests {
             .save_environment(&EnvironmentRecord {
                 env_id: "env-provision-journaled".to_owned(),
                 instance_id: "instance-provision-journaled".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version: "1.0.0".to_owned(),
                 pack_digest: "a".repeat(64),
                 namespace: "sj_env_provision_journaled".to_owned(),
@@ -4803,7 +4890,7 @@ mod tests {
             .save_environment(&EnvironmentRecord {
                 env_id: "env-provision-unjournaled".to_owned(),
                 instance_id: "instance-provision-unjournaled".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version: "1.0.0".to_owned(),
                 pack_digest: "a".repeat(64),
                 namespace: "sj_env_provision_unjournaled".to_owned(),
@@ -4816,7 +4903,7 @@ mod tests {
             .save_environment(&EnvironmentRecord {
                 env_id: "env-provision-mismatched".to_owned(),
                 instance_id: "instance-provision-mismatched".to_owned(),
-                pack_id: "hr-sql-101".to_owned(),
+                pack_id: "hr-analytics".to_owned(),
                 pack_version: "1.0.0".to_owned(),
                 pack_digest: "a".repeat(64),
                 namespace: "sj_env_provision_mismatched".to_owned(),

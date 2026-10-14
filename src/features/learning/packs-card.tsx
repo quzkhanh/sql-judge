@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { InstalledPack, ManagedEnvironmentSummary } from "@/lib/judge-api"
 
-import type { ProblemStatus } from "./problem-status"
+import type { ProblemProgress } from "./problem-progress"
 import {
   packDialectLabel,
   packEnvironmentBadge,
@@ -26,7 +26,7 @@ import {
 type PackCardProps = {
   pack: InstalledPack
   index: number
-  statuses: Map<string, Pick<ProblemStatus, "status">> | null
+  statuses: Map<string, Pick<ProblemProgress, "status">> | null
   environments: ManagedEnvironmentSummary[] | null
 }
 

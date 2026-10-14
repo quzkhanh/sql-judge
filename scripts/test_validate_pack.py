@@ -13,7 +13,7 @@ from zipfile import ZipFile, ZipInfo
 
 from validate_pack import ROOT, load_zip, validate, load_folder
 
-SAMPLE = ROOT / "examples" / "packs" / "hr-sql-101"
+SAMPLE = ROOT / "examples" / "packs" / "hr-analytics"
 
 
 class PackValidatorTests(unittest.TestCase):
@@ -50,6 +50,77 @@ class PackValidatorTests(unittest.TestCase):
         data["tests"][1]["id"] = data["tests"][0]["id"]
         path.write_text(json.dumps(data))
         self.assertTrue(any("Duplicate test id" in s for s in validate(load_folder(self.folder, []))))
+
+    def _rewrite_problem(self, change):
+        path = self.folder / "problems/above-average/problem.json"
+        data = json.loads(path.read_text())
+        change(data)
+        path.write_text(json.dumps(data))
+
+    def test_valid_catalog_sample_tables_accepted(self):
+        self._rewrite_problem(
+            lambda data: data["catalog"].__setitem__(
+                "sample_tables",
+                [{"name": "departments", "rows": [{"id": 1, "name": "Engineering"}]}],
+            )
+        )
+        self.assertEqual([], validate(load_folder(self.folder, [])))
+
+    def test_oversized_catalog_sample_table_rejected(self):
+        rows = [{"id": index, "name": "x"} for index in range(21)]
+        self._rewrite_problem(
+            lambda data: data["catalog"].__setitem__(
+                "sample_tables", [{"name": "departments", "rows": rows}]
+            )
+        )
+        self.assertTrue(any("sample_tables" in s for s in validate(load_folder(self.folder, []))))
+
+    def test_invalid_catalog_sample_table_name_rejected(self):
+        self._rewrite_problem(
+            lambda data: data["catalog"].__setitem__(
+                "sample_tables", [{"name": "bad-name", "rows": []}]
+            )
+        )
+        self.assertTrue(any("sample_tables" in s for s in validate(load_folder(self.folder, []))))
+
+    def test_unknown_catalog_sample_table_rejected(self):
+        self._rewrite_problem(
+            lambda data: data["catalog"].__setitem__(
+                "sample_tables", [{"name": "salaries", "rows": []}]
+            )
+        )
+        self.assertTrue(
+            any("sample table" in s for s in validate(load_folder(self.folder, [])))
+        )
+
+    def test_duplicate_catalog_sample_table_rejected(self):
+        self._rewrite_problem(
+            lambda data: data["catalog"].__setitem__(
+                "sample_tables",
+                [{"name": "departments", "rows": []}, {"name": "departments", "rows": []}],
+            )
+        )
+        self.assertTrue(
+            any("sample table" in s for s in validate(load_folder(self.folder, [])))
+        )
+
+    def test_multiline_starter_sql_accepted(self):
+        self._rewrite_problem(
+            lambda data: data["catalog"].__setitem__(
+                "starter_sql", "SELECT e.id\r\nFROM employees AS e\n\tWHERE e.id > 0;"
+            )
+        )
+        self.assertEqual([], validate(load_folder(self.folder, [])))
+
+    def test_starter_sql_control_characters_rejected(self):
+        for bad in ("SELECT 1\x00", "SELECT 1\rFROM employees", "SELECT 1\x1b[31m", "SELECT 1\x85"):
+            self._rewrite_problem(
+                lambda data, bad=bad: data["catalog"].__setitem__("starter_sql", bad)
+            )
+            self.assertTrue(
+                any("starter_sql" in s for s in validate(load_folder(self.folder, []))),
+                repr(bad),
+            )
 
     def test_symlink_in_folder_rejected(self):
         (self.folder / "escape.sql").symlink_to(self.folder / "schema/001_tables.sql")

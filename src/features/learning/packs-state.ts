@@ -1,14 +1,14 @@
 import type { InstalledPack, ManagedEnvironmentSummary } from "@/lib/judge-api"
 
 import { catalogProblemKey } from "./catalog"
-import type { ProblemStatus } from "./problem-status"
+import type { ProblemProgress } from "./problem-progress"
 
 export type PackTone = "ok" | "warn" | "err" | "muted"
 type PackIdentity = Pick<InstalledPack, "packId" | "version" | "digest">
 
 export function packProgress(
   pack: PackIdentity & Pick<InstalledPack, "problems">,
-  statuses: Map<string, Pick<ProblemStatus, "status">>
+  statuses: Map<string, Pick<ProblemProgress, "status">>
 ) {
   const total = pack.problems.length
   const solved = pack.problems.filter(

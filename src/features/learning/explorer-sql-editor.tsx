@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react"
 import Editor, { type OnMount } from "@monaco-editor/react"
 
-import { useIsDark } from "@/components/use-is-dark"
+import { useResolvedTheme } from "@/hooks/use-resolved-theme"
 import { useAppSettings } from "@/lib/app-settings"
 
 type SqlEditorProps = {
@@ -12,7 +12,7 @@ type SqlEditorProps = {
 }
 
 export function ExplorerSqlEditor({ value, label, onChange, onRun }: SqlEditorProps) {
-  const dark = useIsDark()
+  const { dark } = useResolvedTheme()
   const { editorFontSize } = useAppSettings()
   const onRunRef = useRef(onRun)
 

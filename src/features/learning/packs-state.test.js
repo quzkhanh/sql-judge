@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { problemStatuses } from "./problem-status"
+import { catalogKeyFor, problemProgress } from "./problem-progress"
 import {
   packEnvironmentBadge,
   packMonogram,
@@ -56,7 +56,7 @@ function env(overrides) {
 
 describe("pack progress", () => {
   test("counts distinct accepted submits for this pack version only", () => {
-    const statuses = problemStatuses([
+    const statuses = problemProgress([
       record({}),
       record({ createdAt: "200" }),
       record({ problemId: "p2", verdict: "WrongAnswer" }),
@@ -64,7 +64,7 @@ describe("pack progress", () => {
       record({ problemId: "p2", packVersion: "1.1.0" }),
       record({ problemId: "p3", packHash: "other" }),
       record({ problemId: "gone" }),
-    ])
+    ], catalogKeyFor)
     expect(packProgress(pack, statuses)).toEqual({ solved: 1, total: 3, percent: 33 })
   })
 

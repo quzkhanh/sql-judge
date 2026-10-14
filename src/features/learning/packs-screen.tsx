@@ -12,7 +12,7 @@ import { usePacksData } from "./packs-data"
 import { PacksImportZone } from "./packs-import-zone"
 import { PacksReview } from "./packs-review"
 import { packsHeadingClass, packsSurfaceClass } from "./packs-styles"
-import { problemStatuses } from "./problem-status"
+import { catalogKeyFor, problemProgress } from "./problem-progress"
 
 export function PacksScreen() {
   const data = usePacksData()
@@ -21,7 +21,7 @@ export function PacksScreen() {
   const [pickError, setPickError] = useState<string | null>(null)
   const desktopAvailable = isTauri()
   const importDisabled = isPackImportDisabled(desktopAvailable, picking)
-  const statuses = data.history ? problemStatuses(data.history) : null
+  const statuses = data.history ? problemProgress(data.history, catalogKeyFor) : null
 
   async function handlePick(kind: "archive" | "directory") {
     setPicking(true)

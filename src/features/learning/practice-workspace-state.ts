@@ -8,21 +8,17 @@ export function problemsForPack<T extends { packId: string }>(
   return problems.filter((problem) => problem.packId === packId)
 }
 
-export function paginateProblems<T>(
-  items: T[],
-  requestedPage: number,
-  pageSize = PROBLEM_PAGE_SIZE
-) {
-  const totalPages = Math.max(1, Math.ceil(items.length / pageSize))
+export function paginateProblems<T>(items: T[], requestedPage: number) {
+  const totalPages = Math.max(1, Math.ceil(items.length / PROBLEM_PAGE_SIZE))
   const page = Math.min(Math.max(0, requestedPage), totalPages - 1)
-  const start = page * pageSize
+  const start = page * PROBLEM_PAGE_SIZE
 
   return {
-    items: items.slice(start, start + pageSize),
+    items: items.slice(start, start + PROBLEM_PAGE_SIZE),
     page,
     totalPages,
     start,
-    end: Math.min(start + pageSize, items.length),
+    end: Math.min(start + PROBLEM_PAGE_SIZE, items.length),
   }
 }
 
@@ -36,13 +32,4 @@ export function pageForProblem<T extends { id: string }>(
 
 export function stopVisibleAfter(elapsedMs: number) {
   return elapsedMs >= STOP_GRACE_PERIOD_MS
-}
-
-export function adjacentProblemId<T extends { id: string }>(
-  items: T[],
-  currentId: string,
-  step: -1 | 1
-) {
-  const index = items.findIndex((item) => item.id === currentId)
-  return index < 0 ? null : (items[index + step]?.id ?? null)
 }

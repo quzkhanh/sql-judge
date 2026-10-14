@@ -8,18 +8,19 @@ Root of package contains exactly `pack.json`, `schema/*.sql`, `problems/<problem
 
 ## Pack example
 ```
-hr-sql-101/
+hr-analytics/
 ├── pack.json
 ├── schema/001_tables.sql
-└── problems/above-average/
+└── problems/second-highest-salary/
     ├── problem.json
     ├── reference.sql
     └── tests/
         ├── basic.sql
-        ├── edge.sql
-        └── empty.sql
+        ├── salary-ties.sql
+        ├── null-salaries.sql
+        └── empty-department.sql
 ```
-There is a reference in `examples/packs/hr-sql-101`. Test fixtures insert data into freshly created pack schema; no fixture should depend on SQL from other test fixtures.
+The reference pack is `examples/packs/hr-analytics` (eight problems); its distributable archive is `examples/hr-analytics.sqljudge.zip`. Test fixtures insert data into freshly created pack schema; no fixture should depend on SQL from other test fixtures.
 
 ## Idempotence and versioning
 - Identity: `(pack.id, pack.version, content_sha256)`. Distinct hash with same ID+version is rejected (immutable version); unchanged hash may be a no-op.
@@ -33,14 +34,16 @@ There is a reference in `examples/packs/hr-sql-101`. Test fixtures insert data i
 - `output.columns`: ordered list with `name`, `type`, so users know exact expected shape. SQL type matching maps only through a documented dialect-specific canonicalizer.
 - `tests[*].hidden` controls UI visibility only, not true secrecy on offline desktop; always include one public and at least two hidden adversarial cases.
 - Pack-level `schema` SQL files are ordered. Each fixture is self-contained and applied to *empty schema*; not appended on previous fixture.
+- Optional `catalog` is display-only metadata exposed to the UI and never used for judging: `schema` (table/column descriptions), `sample_rows` (output of the public fixture), `starter_sql` (may be multi-line: `\n`, `\r\n` and `\t` are the only allowed control characters; should be a starting point, not an accepted answer) and `sample_tables` (example input: at most 8 `{ name, rows }` tables, names unique and declared in `catalog.schema` when it is non-empty, at most 20 flat scalar rows each). Keep sample data identical to the public fixture. See ADR-022.
+- The native catalog also exposes `outputColumns`, `rowOrder`, `timeLimitMs` and `fixtureCount` derived from the manifest; hidden fixture contents never cross the IPC boundary.
 - Global fixtures/datasets can be added by **new spec version**, not ad-hoc undocumented fields.
 - Reject ambiguous order-sensitive tasks without deterministic tie-break keys. State output grain explicitly in `statement`.
 
 ## Validation report (target API)
 ```json
 {
-  "pack_id": "hr-sql-101",
-  "version": "1.0.0",
+  "pack_id": "hr-analytics",
+  "version": "1.2.0",
   "structural_status": "valid",
   "database_status": "not_run",
   "diagnostics": []

@@ -36,7 +36,7 @@ describe("history entries", () => {
     expect(entry.title).toBe("Second highest salary")
     expect(entry.difficulty).toBe("medium")
     expect(entry.packLabel).toBe("HR Analytics 1.2.0")
-    expect(entry.problemHref).toBe("#practice?problem=hr%401.2.0%23sha256%3Aabc%3Ap1")
+    expect(entry.problemHref).toBe("#solve/hr%401.2.0%23sha256%3Aabc%3Ap1")
   })
 
   test("renders uninstalled or untracked problems honestly without a link", () => {
@@ -53,7 +53,7 @@ describe("history entries", () => {
     expect(otherVersion).toMatchObject({ title: "Unknown problem", packLabel: "hr 1.1.0", problemHref: null })
   })
 
-  test("counts passed fixtures and uses the run duration stored on each fixture", () => {
+  test("counts passed fixtures and sums per-fixture query time", () => {
     const [entry] = historyEntries(
       [record({ tests: [
         { testId: "basic", verdict: "Accepted", elapsedMs: 9 },
@@ -62,8 +62,8 @@ describe("history entries", () => {
       ] })],
       [pack]
     )
-    // The native judge stores the whole run duration on every fixture row (ADR-022).
-    expect(entry).toMatchObject({ passed: 2, total: 3, elapsedMs: 18 })
+    // ADR-023: each fixture row stores that fixture's own query time.
+    expect(entry).toMatchObject({ passed: 2, total: 3, elapsedMs: 38 })
     expect(historyEntries([record({})], [pack])[0]).toMatchObject({ passed: 0, total: 0, elapsedMs: null })
   })
 

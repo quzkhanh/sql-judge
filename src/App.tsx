@@ -1,10 +1,10 @@
 import { useEffect, useState, type CSSProperties } from "react"
 
-import { AppSidebar } from "@/components/app-sidebar"
+import { AppSidebar, type AppRoute } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { parseHash, routeForLaunch, type AppRoute } from "@/app-route-state"
+import { routeForHash, routeForLaunch } from "@/app-route-state"
 import { ConnectionsScreen } from "@/features/learning/connections-screen"
 import { EnvironmentsScreen } from "@/features/learning/environments-screen"
 import { ExplorerScreen } from "@/features/learning/explorer-screen"
@@ -12,14 +12,13 @@ import { HistoryScreen } from "@/features/learning/history-screen"
 import { HomeScreen } from "@/features/learning/home-screen"
 import { LearningWorkspace } from "@/features/learning/learning-workspace"
 import { PacksScreen } from "@/features/learning/packs-screen"
-import { ProblemsScreen } from "@/features/learning/problems-screen"
 import { ProgressScreen } from "@/features/learning/progress-screen"
 import { SettingsScreen } from "@/features/learning/settings-screen"
 
 const routeTitles: Record<AppRoute, string> = {
   home: "Home",
   problems: "Problems",
-  practice: "Solve",
+  solve: "Solve",
   environments: "Environments",
   history: "History",
   progress: "Progress",
@@ -29,17 +28,53 @@ const routeTitles: Record<AppRoute, string> = {
   settings: "Settings",
 }
 
+function readRoute(): AppRoute {
+  return routeForHash(window.location.hash)
+}
+
+function solveProblemKey() {
+  const encodedKey = window.location.hash.slice("#solve/".length)
+  try {
+    return encodedKey ? decodeURIComponent(encodedKey) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export default function App() {
-  const [route, setRoute] = useState<AppRoute>(() => routeForLaunch())
+  const [route, setRoute] = useState<AppRoute>(() => routeForLaunch(window.location.hash))
 
   useEffect(() => {
-    const handleHashChange = () => setRoute(parseHash(window.location.hash).route)
+    const handleHashChange = () => setRoute(readRoute())
     window.addEventListener("hashchange", handleHashChange)
-    if (window.location.hash !== "#home") {
+    if (!window.location.hash) {
       window.history.replaceState(null, "", "#home")
     }
     return () => window.removeEventListener("hashchange", handleHashChange)
   }, [])
+
+  const screen = (
+    <>
+      {route === "home" ? <HomeScreen /> : null}
+      {route === "problems" || route === "solve" ? (
+        <LearningWorkspace
+          mode={route === "solve" ? "solve" : "problems"}
+          problemKey={route === "solve" ? solveProblemKey() : undefined}
+        />
+      ) : null}
+      {route === "environments" ? <EnvironmentsScreen /> : null}
+      {route === "history" ? <HistoryScreen /> : null}
+      {route === "progress" ? <ProgressScreen /> : null}
+      {route === "packs" ? <PacksScreen /> : null}
+      {route === "connections" ? <ConnectionsScreen /> : null}
+      {route === "explorer" ? <ExplorerScreen /> : null}
+      {route === "settings" ? <SettingsScreen /> : null}
+    </>
+  )
+
+  if (route === "solve") {
+    return <TooltipProvider>{screen}</TooltipProvider>
+  }
 
   return (
     <TooltipProvider>
@@ -51,19 +86,10 @@ export default function App() {
           } as CSSProperties
         }
       >
-        <AppSidebar activeRoute={route} variant="inset" />
+        <AppSidebar activeRoute={route} />
         <SidebarInset className="min-w-0">
           <SiteHeader title={routeTitles[route]} />
-          {route === "home" ? <HomeScreen /> : null}
-          {route === "problems" ? <ProblemsScreen /> : null}
-          {route === "practice" ? <LearningWorkspace /> : null}
-          {route === "environments" ? <EnvironmentsScreen /> : null}
-          {route === "history" ? <HistoryScreen /> : null}
-          {route === "progress" ? <ProgressScreen /> : null}
-          {route === "packs" ? <PacksScreen /> : null}
-          {route === "connections" ? <ConnectionsScreen /> : null}
-          {route === "explorer" ? <ExplorerScreen /> : null}
-          {route === "settings" ? <SettingsScreen /> : null}
+          {screen}
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

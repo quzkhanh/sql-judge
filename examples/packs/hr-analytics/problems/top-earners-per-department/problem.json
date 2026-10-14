@@ -1,0 +1,187 @@
+{
+  "id": "top-earners-per-department",
+  "title": "Top earners per department",
+  "difficulty": "medium",
+  "topics": [
+    "window-functions"
+  ],
+  "statement": "For every department, return the employee or employees with the **highest** salary. If several employees tie for the top salary, return all of them. Ignore `NULL` salaries; a department with no non-`NULL` salary produces no rows. Output one row per top earner: `department_name`, `employee_name`, and `salary`. Any row order is accepted.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "department_name",
+        "type": "text"
+      },
+      {
+        "name": "employee_name",
+        "type": "text"
+      },
+      {
+        "name": "salary",
+        "type": "numeric"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 2000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "catalog": {
+    "schema": [
+      {
+        "name": "departments",
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer"
+          },
+          {
+            "name": "name",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "name": "employees",
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer"
+          },
+          {
+            "name": "name",
+            "type": "text"
+          },
+          {
+            "name": "email",
+            "type": "text"
+          },
+          {
+            "name": "department_id",
+            "type": "integer"
+          },
+          {
+            "name": "manager_id",
+            "type": "integer",
+            "nullable": true
+          },
+          {
+            "name": "salary",
+            "type": "numeric",
+            "nullable": true
+          },
+          {
+            "name": "hired_on",
+            "type": "date"
+          }
+        ]
+      }
+    ],
+    "sample_rows": [
+      {
+        "department_name": "Engineering",
+        "employee_name": "Linh",
+        "salary": 135000
+      },
+      {
+        "department_name": "Finance",
+        "employee_name": "Quan",
+        "salary": 98000
+      },
+      {
+        "department_name": "Design",
+        "employee_name": "Trang",
+        "salary": 87000
+      }
+    ],
+    "starter_sql": "SELECT d.name AS department_name,\n       e.name AS employee_name,\n       e.salary\nFROM employees AS e\nJOIN departments AS d\n  ON d.id = e.department_id;",
+    "sample_tables": [
+      {
+        "name": "employees",
+        "rows": [
+          {
+            "id": 1,
+            "name": "Linh",
+            "department_id": 1,
+            "salary": 135000
+          },
+          {
+            "id": 2,
+            "name": "Minh",
+            "department_id": 1,
+            "salary": 120000
+          },
+          {
+            "id": 3,
+            "name": "Hoa",
+            "department_id": 1,
+            "salary": 120000
+          },
+          {
+            "id": 4,
+            "name": "Quan",
+            "department_id": 2,
+            "salary": 98000
+          },
+          {
+            "id": 5,
+            "name": "Trang",
+            "department_id": 3,
+            "salary": 87000
+          },
+          {
+            "id": 6,
+            "name": "Bao",
+            "department_id": 3,
+            "salary": 72000
+          }
+        ]
+      },
+      {
+        "name": "departments",
+        "rows": [
+          {
+            "id": 1,
+            "name": "Engineering"
+          },
+          {
+            "id": 2,
+            "name": "Finance"
+          },
+          {
+            "id": 3,
+            "name": "Design"
+          }
+        ]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "top-ties",
+      "file": "tests/top-ties.sql",
+      "hidden": true
+    },
+    {
+      "id": "null-salaries",
+      "file": "tests/null-salaries.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty-department",
+      "file": "tests/empty-department.sql",
+      "hidden": true
+    }
+  ]
+}

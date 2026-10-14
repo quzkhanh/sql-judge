@@ -84,7 +84,7 @@ describe("progress summary", () => {
     expect(summary().suggestion).toEqual({
       topic: "aggregation",
       title: "Problem e2",
-      href: "#practice?problem=hr%401.0.0%23d1%3Ae2",
+      href: "#solve/hr%401.0.0%23d1%3Ae2",
     })
   })
 

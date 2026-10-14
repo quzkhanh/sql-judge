@@ -1,5 +1,10 @@
 # Practice Workspace UX Implementation Plan
 
+> **Superseded (2026-10-14):** the Problems and Solve implementation from upstream
+> commit `f2b9f83` (`problems-list.tsx`, `solve-view.tsx`) replaced the one this
+> document describes when `feat/merge-upstream-redesign` merged both lines of work.
+> Kept for history; follow `docs/design/` and `tasks/todo.md` for current work.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Replace the crowded all-pack Practice layout with a pack-scoped, paginated, editor-first workspace that has stable judge feedback and offline schema-aware Monaco completion.

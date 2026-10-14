@@ -66,6 +66,10 @@ function subscribe(listener: () => void) {
   return () => listeners.delete(listener)
 }
 
+export function currentSettings() {
+  return current
+}
+
 export function useAppSettings() {
   return useSyncExternalStore(subscribe, () => current)
 }

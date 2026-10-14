@@ -9,6 +9,9 @@
     --font-heading: var(--font-sans);
     --font-sans: Geist, 'Inter Variable', sans-serif;
     --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --color-zebra: var(--zebra);
+    --color-hover: var(--hover);
+    --shadow-xs-design: var(--shadow-design);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -98,6 +101,9 @@
     --sidebar-accent-foreground: #18181b;
     --sidebar-border: #e8e8eb;
     --sidebar-ring: #2563eb;
+    --zebra: #fafafb;
+    --hover: #f2f2f4;
+    --shadow-design: 0 1px 2px rgba(16, 16, 24, 0.05);
 }
 
 .dark {
@@ -140,6 +146,9 @@
     --sidebar-accent-foreground: #f4f4f5;
     --sidebar-border: #25252a;
     --sidebar-ring: #60a5fa;
+    --zebra: #0e0e11;
+    --hover: #1b1b1f;
+    --shadow-design: 0 1px 2px rgba(0, 0, 0, 0.5);
 }
 
 @layer base {
@@ -208,4 +217,21 @@ body {
   .ui-selectable {
     @apply select-text;
   }
+}
+
+/* Solve artboard surface: page, pane and editor tokens from docs/design/Solve — submit verdict-html. */
+.solve-surface {
+  --solve-bg: #f4f4f6;
+  --solve-border: #e6e6ea;
+  --line: #f6f6f8;
+  --gutter: #a1a1aa;
+  --fn: #2563eb;
+}
+
+.dark .solve-surface {
+  --solve-bg: #060608;
+  --solve-border: #24242a;
+  --line: #18181c;
+  --gutter: #55555e;
+  --fn: #93c5fd;
 }

@@ -223,6 +223,22 @@ def validate(files: dict[str, bytes]) -> list[str]:
             check_sql(files, test_path, errors)
         if visible < 1 or hidden < 2:
             errors.append(f"{problem_path}: requires >=1 visible and >=2 hidden fixtures")
+        catalog = problem.get("catalog", {})
+        if "starter_sql" in catalog and not starter_sql_is_allowed(catalog["starter_sql"]):
+            errors.append(
+                f"{problem_path}: catalog starter_sql contains a control character "
+                "(only \\n, \\r\\n and \\t are allowed)"
+            )
+        catalog_tables = {table["name"] for table in catalog.get("schema", [])}
+        sample_tables: set[str] = set()
+        for table in catalog.get("sample_tables", []):
+            if table["name"] in sample_tables:
+                errors.append(f"{problem_path}: duplicate catalog sample table {table['name']}")
+            sample_tables.add(table["name"])
+            if catalog_tables and table["name"] not in catalog_tables:
+                errors.append(
+                    f"{problem_path}: catalog sample table {table['name']} is not in catalog.schema"
+                )
         column_names = [col["name"] for col in problem["output"]["columns"]]
         if len(column_names) != len(set(column_names)):
             errors.append(f"{problem_path}: duplicate output column names")
@@ -230,6 +246,21 @@ def validate(files: dict[str, bytes]) -> list[str]:
     if extras:
         errors.append(f"Undeclared files: {', '.join(sorted(extras))}")
     return errors
+
+
+def starter_sql_is_allowed(sql: str) -> bool:
+    """Mirror of the Rust rule: only \\n, \\r\\n and \\t control characters are allowed."""
+    index = 0
+    while index < len(sql):
+        character = sql[index]
+        code = ord(character)
+        if character == "\r" and sql[index + 1 : index + 2] == "\n":
+            index += 2
+            continue
+        if character not in "\n\t" and (code < 0x20 or 0x7F <= code <= 0x9F):
+            return False
+        index += 1
+    return True
 
 
 def check_sql(files: dict[str, bytes], path: str, errors: list[str]) -> None:

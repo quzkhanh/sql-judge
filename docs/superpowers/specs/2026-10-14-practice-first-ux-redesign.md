@@ -1,5 +1,10 @@
 # Practice-First UX Redesign
 
+> **Superseded (2026-10-14):** the Problems and Solve implementation from upstream
+> commit `f2b9f83` (`problems-list.tsx`, `solve-view.tsx`) replaced the one this
+> document describes when `feat/merge-upstream-redesign` merged both lines of work.
+> Kept for history; follow `docs/design/` and `tasks/todo.md` for current work.
+
 ## Status
 
 Approved design direction: Practice-first with a shared page system. This

@@ -1,5 +1,5 @@
 import type { ReactNode } from "react"
-import { Check, LoaderCircle, Play, RefreshCw, TriangleAlert, X } from "lucide-react"
+import { Ban, Check, LoaderCircle, Play, RefreshCw, TriangleAlert, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -13,10 +13,11 @@ export const chipToneClass: Record<HistoryChipTone, string> = {
   ok: "bg-ok-bg text-ok",
   err: "bg-err-bg text-err",
   warn: "bg-warn-bg text-warn",
+  muted: "bg-muted text-muted-foreground",
   run: "bg-muted text-muted-foreground",
 }
 
-const chipIcon = { ok: Check, err: X, warn: TriangleAlert, run: Play }
+const chipIcon = { ok: Check, err: X, warn: TriangleAlert, muted: Ban, run: Play }
 
 export function VerdictChip({ label, tone }: { label: string; tone: HistoryChipTone }) {
   const Icon = chipIcon[tone]

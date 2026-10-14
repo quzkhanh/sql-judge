@@ -1,0 +1,167 @@
+{
+  "id": "above-average",
+  "title": "Employees above department average",
+  "difficulty": "easy",
+  "topics": [
+    "subqueries",
+    "aggregation"
+  ],
+  "statement": "Return one row per employee whose `salary` is **strictly greater** than the average of the non-`NULL` salaries in their own department. Employees with a `NULL` salary never qualify, and an employee who earns exactly the average is not included. Output `employee_id` and `employee_name`. Any row order is accepted.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "employee_id",
+        "type": "integer"
+      },
+      {
+        "name": "employee_name",
+        "type": "text"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 2000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "catalog": {
+    "schema": [
+      {
+        "name": "departments",
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer"
+          },
+          {
+            "name": "name",
+            "type": "text"
+          }
+        ]
+      },
+      {
+        "name": "employees",
+        "columns": [
+          {
+            "name": "id",
+            "type": "integer"
+          },
+          {
+            "name": "name",
+            "type": "text"
+          },
+          {
+            "name": "email",
+            "type": "text"
+          },
+          {
+            "name": "department_id",
+            "type": "integer"
+          },
+          {
+            "name": "manager_id",
+            "type": "integer",
+            "nullable": true
+          },
+          {
+            "name": "salary",
+            "type": "numeric",
+            "nullable": true
+          },
+          {
+            "name": "hired_on",
+            "type": "date"
+          }
+        ]
+      }
+    ],
+    "sample_rows": [
+      {
+        "employee_id": 1,
+        "employee_name": "Linh"
+      },
+      {
+        "employee_id": 4,
+        "employee_name": "Quan"
+      }
+    ],
+    "starter_sql": "SELECT e.id AS employee_id,\n       e.name AS employee_name,\n       e.salary\nFROM employees AS e;",
+    "sample_tables": [
+      {
+        "name": "employees",
+        "rows": [
+          {
+            "id": 1,
+            "name": "Linh",
+            "department_id": 1,
+            "salary": 135000
+          },
+          {
+            "id": 2,
+            "name": "Minh",
+            "department_id": 1,
+            "salary": 100000
+          },
+          {
+            "id": 3,
+            "name": "Hoa",
+            "department_id": 1,
+            "salary": 90000
+          },
+          {
+            "id": 4,
+            "name": "Quan",
+            "department_id": 2,
+            "salary": 98000
+          },
+          {
+            "id": 5,
+            "name": "Trang",
+            "department_id": 2,
+            "salary": 72000
+          }
+        ]
+      },
+      {
+        "name": "departments",
+        "rows": [
+          {
+            "id": 1,
+            "name": "Engineering"
+          },
+          {
+            "id": 2,
+            "name": "Finance"
+          }
+        ]
+      }
+    ]
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "ties-at-average",
+      "file": "tests/ties-at-average.sql",
+      "hidden": true
+    },
+    {
+      "id": "null-salaries",
+      "file": "tests/null-salaries.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty-department",
+      "file": "tests/empty-department.sql",
+      "hidden": true
+    }
+  ]
+}

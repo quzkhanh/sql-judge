@@ -58,6 +58,17 @@ pub struct ProblemCatalogEntry {
     pub schema: Vec<CatalogTable>,
     pub sample_rows: Vec<BTreeMap<String, serde_json::Value>>,
     pub starter_sql: Option<String>,
+    pub output_columns: Vec<Column>,
+    pub row_order: RowOrder,
+    pub time_limit_ms: u32,
+    pub fixture_count: usize,
+    pub sample_tables: Vec<CatalogSampleTable>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct CatalogSampleTable {
+    pub name: String,
+    pub rows: Vec<BTreeMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -165,6 +176,7 @@ impl ValidatedPack {
                 let schema = catalog_schema(&problem)?;
                 let sample_rows = catalog_sample_rows(&problem)?;
                 let starter_sql = catalog_starter_sql(&problem)?;
+                let sample_tables = catalog_sample_tables(&problem)?;
                 Ok(ProblemCatalogEntry {
                     id: problem.id,
                     title: problem.title,
@@ -175,6 +187,11 @@ impl ValidatedPack {
                     schema,
                     sample_rows,
                     starter_sql,
+                    output_columns: problem.output.columns,
+                    row_order: problem.output.row_order,
+                    time_limit_ms: problem.limits.statement_timeout_ms,
+                    fixture_count: problem.tests.len(),
+                    sample_tables,
                 })
             })
             .collect::<Result<Vec<_>, PackError>>()?;
@@ -285,6 +302,15 @@ struct CatalogManifest {
     sample_rows: Vec<BTreeMap<String, serde_json::Value>>,
     #[serde(default)]
     starter_sql: Option<String>,
+    #[serde(default)]
+    sample_tables: Vec<CatalogSampleTableManifest>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogSampleTableManifest {
+    name: String,
+    rows: Vec<BTreeMap<String, serde_json::Value>>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -941,6 +967,8 @@ const MAX_CATALOG_ROWS: usize = 100;
 const MAX_CATALOG_ROW_COLUMNS: usize = 128;
 const MAX_CATALOG_CELL_BYTES: usize = 4 * 1024;
 const MAX_CATALOG_STARTER_BYTES: usize = 64 * 1024;
+const MAX_CATALOG_SAMPLE_TABLES: usize = 8;
+const MAX_CATALOG_SAMPLE_TABLE_ROWS: usize = 20;
 
 fn validate_catalog(problem: &ProblemManifest) -> Result<(), PackError> {
     let Some(catalog) = &problem.catalog else {
@@ -948,6 +976,11 @@ fn validate_catalog(problem: &ProblemManifest) -> Result<(), PackError> {
     };
     if catalog.schema.len() > MAX_CATALOG_TABLES
         || catalog.sample_rows.len() > MAX_CATALOG_ROWS
+        || catalog.sample_tables.len() > MAX_CATALOG_SAMPLE_TABLES
+        || catalog
+            .sample_tables
+            .iter()
+            .any(|table| table.rows.len() > MAX_CATALOG_SAMPLE_TABLE_ROWS)
         || catalog
             .starter_sql
             .as_deref()
@@ -983,29 +1016,81 @@ fn validate_catalog(problem: &ProblemManifest) -> Result<(), PackError> {
         }
     }
     for row in &catalog.sample_rows {
-        if row.len() > MAX_CATALOG_ROW_COLUMNS {
+        validate_catalog_row(row)?;
+    }
+    let mut sample_table_names = BTreeSet::new();
+    for table in &catalog.sample_tables {
+        if !is_catalog_identifier(&table.name)
+            || !sample_table_names.insert(table.name.as_str())
+            || (!table_names.is_empty() && !table_names.contains(&table.name))
+        {
             return Err(PackError::InvalidManifest(
-                "catalog sample row is too wide".to_owned(),
+                "catalog sample table metadata is invalid".to_owned(),
             ));
         }
-        for (name, value) in row {
-            if !is_catalog_identifier(name) || !catalog_value_is_bounded(value) {
-                return Err(PackError::InvalidManifest(
-                    "catalog sample row is invalid".to_owned(),
-                ));
-            }
+        for row in &table.rows {
+            validate_catalog_row(row)?;
         }
     }
     if catalog
         .starter_sql
         .as_deref()
-        .is_some_and(|sql| sql.chars().any(char::is_control))
+        .is_some_and(|sql| !starter_sql_characters_are_allowed(sql))
     {
         return Err(PackError::InvalidManifest(
             "catalog starter SQL is invalid".to_owned(),
         ));
     }
     Ok(())
+}
+
+/// Starter SQL may span lines: `\n`, `\r\n` and `\t` are the only control
+/// characters allowed. A lone `\r` and every other control character are rejected.
+fn starter_sql_characters_are_allowed(sql: &str) -> bool {
+    let mut characters = sql.chars().peekable();
+    while let Some(character) = characters.next() {
+        match character {
+            '\n' | '\t' => {}
+            '\r' if characters.peek() == Some(&'\n') => {}
+            other if other.is_control() => return false,
+            _ => {}
+        }
+    }
+    true
+}
+
+fn validate_catalog_row(row: &BTreeMap<String, serde_json::Value>) -> Result<(), PackError> {
+    if row.len() > MAX_CATALOG_ROW_COLUMNS {
+        return Err(PackError::InvalidManifest(
+            "catalog sample row is too wide".to_owned(),
+        ));
+    }
+    for (name, value) in row {
+        if !is_catalog_identifier(name) || !catalog_value_is_bounded(value) {
+            return Err(PackError::InvalidManifest(
+                "catalog sample row is invalid".to_owned(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn catalog_sample_tables(problem: &ProblemManifest) -> Result<Vec<CatalogSampleTable>, PackError> {
+    validate_catalog(problem)?;
+    Ok(problem
+        .catalog
+        .as_ref()
+        .map(|catalog| {
+            catalog
+                .sample_tables
+                .iter()
+                .map(|table| CatalogSampleTable {
+                    name: table.name.clone(),
+                    rows: table.rows.clone(),
+                })
+                .collect()
+        })
+        .unwrap_or_default())
 }
 
 fn catalog_schema(problem: &ProblemManifest) -> Result<Vec<CatalogTable>, PackError> {

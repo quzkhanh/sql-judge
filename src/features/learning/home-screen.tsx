@@ -21,7 +21,7 @@ import {
 import { catalogProblems, type LearningProblem } from "./catalog"
 import { DifficultyBadge } from "./difficulty-badge"
 import { homeProblems } from "./home-state"
-import { problemStatuses, resumeProblemId } from "./problem-status"
+import { catalogKeyFor, problemProgress, resumeProblemId } from "./problem-progress"
 import { learningLoadErrorMessage } from "./load-state"
 
 const homeCardClass =
@@ -48,7 +48,7 @@ export function HomeScreen() {
   }, [])
 
   const problems = catalogProblems(packs)
-  const resumeId = resumeProblemId(problemStatuses(history)) ?? ""
+  const resumeId = resumeProblemId(problemProgress(history, catalogKeyFor)) ?? ""
   const resumePackId = problems.find((problem) => problem.id === resumeId)?.packId
   const activePack = packs.find((pack) => pack.packId === resumePackId) ?? packs[0]
   const { resume, next } = homeProblems(
