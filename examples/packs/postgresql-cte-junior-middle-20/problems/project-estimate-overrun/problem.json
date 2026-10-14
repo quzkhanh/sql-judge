@@ -1,0 +1,54 @@
+{
+  "id": "project-estimate-overrun",
+  "title": "CTE 13 — Find Projects Over Budgeted Hours",
+  "difficulty": "medium",
+  "topics": ["cte", "pre-aggregation", "join-multiplication", "null"],
+  "statement": "Tìm project mà tổng hours thực tế từ work_logs LỚN HƠN tổng estimated_hours từ tasks. NULL ở cả 2 bảng tính 0; project không có task/log có tổng 0. Tránh JOIN tasks trực tiếp với work_logs rồi cộng estimated_hours khiến estimate bị nhân bản nếu 1 task có nhiều log. Mỗi dòng = project bị vượt. Trả về project_id, planned_hours, actual_hours, excess_hours. Bắt buộc luyện bằng WITH ... AS (recursive ở bài yêu cầu đệ quy); judge chấm theo output.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "project_id",
+        "type": "integer"
+      },
+      {
+        "name": "planned_hours",
+        "type": "numeric"
+      },
+      {
+        "name": "actual_hours",
+        "type": "numeric"
+      },
+      {
+        "name": "excess_hours",
+        "type": "numeric"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 5000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "edge",
+      "file": "tests/edge.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty",
+      "file": "tests/empty.sql",
+      "hidden": true
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "id": "descendant-effort-per-root",
+  "title": "CTE 19 — Roll Up Descendant Estimated Hours",
+  "difficulty": "hard",
+  "topics": ["recursive-cte", "hierarchy", "aggregation", "null"],
+  "statement": "Báo cáo tất cả root task (parent_task_id IS NULL): descendant_count là số descendant mọi độ sâu KHÔNG gồm root; descendant_estimated_hours là tổng estimated_hours của descendant (NULL tính 0), KHÔNG cộng estimated_hours của root. Root không có con phải trả về 0/0. Mỗi dòng = một root task. Trả về root_task_id, descendant_count, descendant_estimated_hours. Input đảm bảo tree/forest hợp lệ, không cycle. Bắt buộc luyện bằng WITH ... AS (recursive ở bài yêu cầu đệ quy); judge chấm theo output.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "root_task_id",
+        "type": "integer"
+      },
+      {
+        "name": "descendant_count",
+        "type": "bigint"
+      },
+      {
+        "name": "descendant_estimated_hours",
+        "type": "numeric"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 5000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "edge",
+      "file": "tests/edge.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty",
+      "file": "tests/empty.sql",
+      "hidden": true
+    }
+  ]
+}

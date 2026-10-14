@@ -1,0 +1,54 @@
+{
+  "id": "import-quality-report",
+  "title": "CTE 15 — Import Quality & Duplicate Audit",
+  "difficulty": "hard",
+  "topics": ["cte", "window", "left-join", "data-quality"],
+  "statement": "Lập báo cáo cho TẤT CẢ imports, kể cả import không có staging row. total_rows = tổng row; duplicate_rows = số row THỪA khi trùng (import_id, external_key) khác NULL, giữ bản ghi đầu tiên theo (source_row_number ASC, id ASC); invalid_rows = số row thiếu external_key, thiếu user_id hoặc payload_status KHÔNG thuộc AVAILABLE/IN_PROGRESS/DONE (NULL là invalid). Row duplicate vẫn có thể invalid, hai bộ đếm độc lập. Mỗi dòng = 1 import. Trả về import_id, total_rows, duplicate_rows, invalid_rows. Bắt buộc luyện bằng WITH ... AS (recursive ở bài yêu cầu đệ quy); judge chấm theo output.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "import_id",
+        "type": "integer"
+      },
+      {
+        "name": "total_rows",
+        "type": "bigint"
+      },
+      {
+        "name": "duplicate_rows",
+        "type": "bigint"
+      },
+      {
+        "name": "invalid_rows",
+        "type": "bigint"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 5000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "edge",
+      "file": "tests/edge.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty",
+      "file": "tests/empty.sql",
+      "hidden": true
+    }
+  ]
+}

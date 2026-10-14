@@ -1,0 +1,50 @@
+{
+  "id": "next-assignable-task",
+  "title": "CTE 20 — Pick Next Assignable Task per Project",
+  "difficulty": "hard",
+  "topics": ["cte", "pre-aggregation", "row-number", "scheduler"],
+  "statement": "Scheduler cần chọn đúng MỘT task tốt nhất cho MỖI project ACTIVE có ít nhất 1 task hợp lệ. Task hợp lệ: status IN_PROGRESS hoặc AVAILABLE, số ACTIVE assignments < capacity. Ưu tiên lần lượt: IN_PROGRESS trước AVAILABLE; priority lớn hơn trước; created_at cũ hơn trước; cuối cùng task id nhỏ hơn. DONE/CANCELLED assignment không giữ slot. Mỗi dòng = project có candidate. Trả về project_id, task_id, available_slots (= capacity trừ ACTIVE assignment count). Chú ý task có 0 assignment và project rỗng. Bắt buộc luyện bằng WITH ... AS (recursive ở bài yêu cầu đệ quy); judge chấm theo output.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "project_id",
+        "type": "integer"
+      },
+      {
+        "name": "task_id",
+        "type": "integer"
+      },
+      {
+        "name": "available_slots",
+        "type": "bigint"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 5000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "edge",
+      "file": "tests/edge.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty",
+      "file": "tests/empty.sql",
+      "hidden": true
+    }
+  ]
+}

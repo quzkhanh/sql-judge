@@ -318,6 +318,17 @@ fn sample_pack_passes_strict_structural_validation() {
 }
 
 #[test]
+fn checked_in_cte_pack_passes_strict_structural_validation() {
+    let archive = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples/postgresql-cte-junior-middle-20.sqljudge.zip");
+
+    PackData::from_path(archive)
+        .expect("load checked-in CTE pack")
+        .validate()
+        .expect("checked-in CTE pack must satisfy the v1 contract");
+}
+
+#[test]
 fn pack_schema_rejects_cross_namespace_and_database_qualified_identifiers() {
     let (_temp, pack) = copy_sample();
     fs::write(

@@ -1,0 +1,46 @@
+{
+  "id": "projects-without-completions",
+  "title": "CTE 06 — Projects Without Completed Tasks",
+  "difficulty": "medium",
+  "topics": ["cte", "anti-join", "null"],
+  "statement": "Tìm TẤT CẢ project không có task nào status DONE (bao gồm project hoàn toàn trống hoặc chỉ có task AVAILABLE/IN_PROGRESS/NULL). Mỗi dòng = một project. Trả về project_id, project_name. Không dùng DISTINCT để che nhân bản dòng. Bắt buộc luyện bằng WITH ... AS (recursive ở bài yêu cầu đệ quy); judge chấm theo output.",
+  "dialect": "postgresql",
+  "reference": "reference.sql",
+  "output": {
+    "row_order": "unordered",
+    "strict_column_names": true,
+    "strict_column_types": true,
+    "columns": [
+      {
+        "name": "project_id",
+        "type": "integer"
+      },
+      {
+        "name": "project_name",
+        "type": "text"
+      }
+    ]
+  },
+  "limits": {
+    "statement_timeout_ms": 5000,
+    "max_rows": 10000,
+    "max_bytes": 16777216
+  },
+  "tests": [
+    {
+      "id": "basic",
+      "file": "tests/basic.sql",
+      "hidden": false
+    },
+    {
+      "id": "edge",
+      "file": "tests/edge.sql",
+      "hidden": true
+    },
+    {
+      "id": "empty",
+      "file": "tests/empty.sql",
+      "hidden": true
+    }
+  ]
+}
