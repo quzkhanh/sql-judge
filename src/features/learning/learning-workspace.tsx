@@ -33,8 +33,8 @@ import {
 import {
   catalogProblems,
   catalogProblemKey,
+  canJudgeProblem,
   filterProblems,
-  hasCompleteProblemMetadata,
   hasSampleData,
   sampleColumns,
   type LearningProblem,
@@ -180,7 +180,7 @@ export function LearningWorkspace() {
       starterSql: "",
     }
   const draft = drafts[selectedProblem.id] ?? selectedProblem.starterSql
-  const completeMetadata = hasCompleteProblemMetadata(selectedProblem)
+  const judgeable = canJudgeProblem(selectedProblem)
 
   function updateDraft(value: string | undefined) {
     setDrafts((current) => ({
@@ -190,7 +190,7 @@ export function LearningWorkspace() {
   }
 
   async function run(mode: "run" | "submit") {
-    if (!selectedProblem.id || !completeMetadata) {
+    if (!selectedProblem.id || !judgeable) {
       return
     }
     const problemIdentity = selectedProblem.id
@@ -411,12 +411,12 @@ export function LearningWorkspace() {
                     catalogLoading ||
                     catalogError !== null ||
                     !selectedProblem.id ||
-                    !completeMetadata
+                    !judgeable
                   }
                   title={
-                    completeMetadata
+                    judgeable
                       ? undefined
-                      : "Complete schema, sample output, and starter SQL metadata is required"
+                      : "An installed problem pack is required"
                   }
                 >
                   <Play />
@@ -430,12 +430,12 @@ export function LearningWorkspace() {
                     catalogLoading ||
                     catalogError !== null ||
                     !selectedProblem.id ||
-                    !completeMetadata
+                    !judgeable
                   }
                   title={
-                    completeMetadata
+                    judgeable
                       ? undefined
-                      : "Complete schema, sample output, and starter SQL metadata is required"
+                      : "An installed problem pack is required"
                   }
                 >
                   <Send />

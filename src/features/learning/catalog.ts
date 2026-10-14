@@ -45,6 +45,20 @@ export function hasInstalledProblems(
   return pack.problems.length > 0
 }
 
+export function canJudgeProblem(
+  problem: Pick<
+    LearningProblem,
+    "problemId" | "packId" | "packVersion" | "packDigest"
+  >
+): boolean {
+  return [
+    problem.problemId,
+    problem.packId,
+    problem.packVersion,
+    problem.packDigest,
+  ].every((value) => value.trim().length > 0)
+}
+
 export function hasCompleteProblemMetadata(
   problem: Pick<
     LearningProblem,

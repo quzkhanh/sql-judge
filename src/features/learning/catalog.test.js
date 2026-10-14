@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
 
 import {
+  canJudgeProblem,
   catalogProblems,
   hasCompleteProblemMetadata,
   hasInstalledProblems,
@@ -33,6 +34,20 @@ describe("installed pack/problem states", () => {
     expect(
       hasCompleteProblemMetadata({ ...completeProblem, starterSql: null })
     ).toBe(false)
+  })
+
+  test("allows judging when optional catalog metadata is missing", () => {
+    expect(
+      canJudgeProblem({
+        problemId: "eligible-task-filter",
+        packId: "cte-pack",
+        packVersion: "1.0.0",
+        packDigest: "a".repeat(64),
+        schema: [],
+        sampleRows: [],
+        starterSql: "",
+      })
+    ).toBe(true)
   })
 })
 
