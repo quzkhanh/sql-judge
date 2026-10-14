@@ -34,6 +34,8 @@ export function catalogProblems(packs: InstalledPack[]): LearningProblem[] {
         schema: problem.schema ?? [],
         sampleRows: problem.sampleRows ?? [],
         starterSql: problem.starterSql ?? "",
+        outputColumns: problem.outputColumns ?? [],
+        sampleTables: problem.sampleTables ?? [],
       }
     })
   )

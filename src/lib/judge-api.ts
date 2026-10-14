@@ -39,11 +39,19 @@ export type JudgeRunRequest = {
   requestId?: string
 }
 
+export type JudgeTestResult = {
+  id: string
+  verdict: JudgeVerdict
+  elapsedMs: number
+  hidden: boolean
+}
+
 export type JudgeRunResult = {
   status: "completed" | "unavailable" | "error"
   verdict?: JudgeVerdict
   columns?: Array<{ name: string; type: string }>
   rows?: Array<Array<string | number | boolean | null>>
+  tests?: JudgeTestResult[]
   durationMs: number
   message: string
 }
@@ -139,6 +147,11 @@ export type ManagedPackSummary = {
   digest: string
 }
 
+export type CatalogSampleTable = {
+  name: string
+  rows: Array<Record<string, CatalogSampleValue>>
+}
+
 export type InstalledProblem = {
   id: string
   title: string
@@ -149,6 +162,11 @@ export type InstalledProblem = {
   schema: CatalogTable[]
   sampleRows: Array<Record<string, CatalogSampleValue>>
   starterSql: string | null
+  outputColumns: Array<{ name: string; type: string }>
+  rowOrder: "ordered" | "unordered"
+  timeLimitMs: number
+  fixtureCount: number
+  sampleTables: CatalogSampleTable[]
 }
 
 export type InstalledPack = {
@@ -184,6 +202,7 @@ export type SubmissionHistorySummary = {
   packId: string
   packVersion: string
   packHash: string
+  problemId: string | null
   engineVersion: string
   policyVersion: string
   verdict: string

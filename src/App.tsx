@@ -4,7 +4,7 @@ import { AppSidebar, type AppRoute } from "@/components/app-sidebar"
 import { SiteHeader } from "@/components/site-header"
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { routeForLaunch } from "@/app-route-state"
+import { routeForHash, routeForLaunch } from "@/app-route-state"
 import { ConnectionsScreen } from "@/features/learning/connections-screen"
 import { EnvironmentsScreen } from "@/features/learning/environments-screen"
 import { HistoryScreen } from "@/features/learning/history-screen"
@@ -15,7 +15,8 @@ import { ProgressScreen } from "@/features/learning/progress-screen"
 
 const routeTitles: Record<AppRoute, string> = {
   home: "Home",
-  practice: "Practice",
+  problems: "Problems",
+  solve: "Solve",
   environments: "Environments",
   history: "History",
   progress: "Progress",
@@ -24,21 +25,50 @@ const routeTitles: Record<AppRoute, string> = {
 }
 
 function readRoute(): AppRoute {
-  const route = window.location.hash.slice(1) as AppRoute
-  return route in routeTitles ? route : "home"
+  return routeForHash(window.location.hash)
+}
+
+function solveProblemKey() {
+  const encodedKey = window.location.hash.slice("#solve/".length)
+  try {
+    return encodedKey ? decodeURIComponent(encodedKey) : undefined
+  } catch {
+    return undefined
+  }
 }
 
 export default function App() {
-  const [route, setRoute] = useState<AppRoute>(() => routeForLaunch())
+  const [route, setRoute] = useState<AppRoute>(() => routeForLaunch(window.location.hash))
 
   useEffect(() => {
     const handleHashChange = () => setRoute(readRoute())
     window.addEventListener("hashchange", handleHashChange)
-    if (window.location.hash !== "#home") {
+    if (!window.location.hash) {
       window.history.replaceState(null, "", "#home")
     }
     return () => window.removeEventListener("hashchange", handleHashChange)
   }, [])
+
+  const screen = (
+    <>
+      {route === "home" ? <HomeScreen /> : null}
+      {route === "problems" || route === "solve" ? (
+        <LearningWorkspace
+          mode={route === "solve" ? "solve" : "problems"}
+          problemKey={route === "solve" ? solveProblemKey() : undefined}
+        />
+      ) : null}
+      {route === "environments" ? <EnvironmentsScreen /> : null}
+      {route === "history" ? <HistoryScreen /> : null}
+      {route === "progress" ? <ProgressScreen /> : null}
+      {route === "packs" ? <PacksScreen /> : null}
+      {route === "connections" ? <ConnectionsScreen /> : null}
+    </>
+  )
+
+  if (route === "solve") {
+    return <TooltipProvider>{screen}</TooltipProvider>
+  }
 
   return (
     <TooltipProvider>
@@ -50,16 +80,10 @@ export default function App() {
           } as CSSProperties
         }
       >
-        <AppSidebar activeRoute={route} variant="inset" />
+        <AppSidebar activeRoute={route} />
         <SidebarInset>
           <SiteHeader title={routeTitles[route]} />
-          {route === "home" ? <HomeScreen /> : null}
-          {route === "practice" ? <LearningWorkspace /> : null}
-          {route === "environments" ? <EnvironmentsScreen /> : null}
-          {route === "history" ? <HistoryScreen /> : null}
-          {route === "progress" ? <ProgressScreen /> : null}
-          {route === "packs" ? <PacksScreen /> : null}
-          {route === "connections" ? <ConnectionsScreen /> : null}
+          {screen}
         </SidebarInset>
       </SidebarProvider>
     </TooltipProvider>

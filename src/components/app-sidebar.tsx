@@ -1,32 +1,25 @@
 import * as React from "react"
 import {
-  BarChart3,
   BookOpen,
-  Cable,
+  ChartColumn,
   Database,
-  FolderOpen,
   History,
-  Home,
-  LayoutDashboard,
+  House,
+  Package,
+  Plug,
   Search,
+  type LucideIcon,
 } from "lucide-react"
 
-import {
-  Sidebar,
-  SidebarContent,
-  SidebarFooter,
-  SidebarGroup,
-  SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
-} from "@/components/ui/sidebar"
+import { Sidebar } from "@/components/ui/sidebar"
+import { getManagedRuntimeStatus, type ManagedRuntimeStatus } from "@/lib/judge-api"
+import { cn } from "@/lib/utils"
+import { runtimeIndicator } from "./runtime-indicator"
 
 export type AppRoute =
   | "home"
-  | "practice"
+  | "problems"
+  | "solve"
   | "environments"
   | "history"
   | "progress"
@@ -36,144 +29,122 @@ export type AppRoute =
 type NavigationItem = {
   route: AppRoute
   label: string
-  icon: typeof LayoutDashboard
+  icon: LucideIcon
 }
 
-const navigation: NavigationItem[] = [
-  { route: "home", label: "Home", icon: Home },
-  { route: "practice", label: "Practice", icon: LayoutDashboard },
-  { route: "history", label: "History", icon: History },
-  { route: "progress", label: "Progress", icon: BarChart3 },
+const navigationGroups: Array<{ label: string; items: NavigationItem[] }> = [
+  {
+    label: "Learn",
+    items: [
+      { route: "home", label: "Home", icon: House },
+      { route: "problems", label: "Problems", icon: BookOpen },
+      { route: "history", label: "History", icon: History },
+      { route: "progress", label: "Progress", icon: ChartColumn },
+    ],
+  },
+  {
+    label: "Library",
+    items: [{ route: "packs", label: "Packs", icon: Package }],
+  },
+  {
+    label: "Data",
+    items: [
+      { route: "environments", label: "Environments", icon: Database },
+      { route: "connections", label: "Connections", icon: Plug },
+    ],
+  },
 ]
 
-const libraryNavigation: NavigationItem[] = [
-  { route: "packs", label: "Packs", icon: FolderOpen },
-]
-
-const dataNavigation: NavigationItem[] = [
-  { route: "environments", label: "Environments", icon: Database },
-  { route: "connections", label: "Connections", icon: Cable },
-]
+const focusRing =
+  "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+const runtimeDots = { ok: "bg-[#16a34a]", err: "bg-err", muted: "bg-muted-foreground" }
 
 export function AppSidebar({
   activeRoute,
   ...props
 }: React.ComponentProps<typeof Sidebar> & { activeRoute: AppRoute }) {
+  const [runtime, setRuntime] = React.useState<ManagedRuntimeStatus | null | undefined>()
+  const indicator = runtimeIndicator(runtime)
+
+  React.useEffect(() => {
+    let active = true
+    void getManagedRuntimeStatus()
+      .then((status) => active && setRuntime(status))
+      .catch(() => active && setRuntime(null))
+    return () => {
+      active = false
+    }
+  }, [activeRoute])
+
   return (
     <Sidebar collapsible="offcanvas" {...props}>
-      <SidebarHeader>
-        <SidebarMenu className="mt-1">
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              className="h-auto! data-[slot=sidebar-menu-button]:p-1.5!"
-              render={<a href="#home" />}
-              isActive={activeRoute === "home"}
-            >
-              <span className="flex size-7 items-center justify-center rounded-lg bg-sidebar-primary font-mono text-xs font-medium text-sidebar-primary-foreground">SJ</span>
-              <span className="flex flex-col leading-tight"><span className="text-base font-semibold">SQL Judge</span><span className="text-xs font-normal text-sidebar-foreground/60">Local workspace</span></span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup className="pb-1">
-          <SidebarGroupContent>
-            <button
-              type="button"
-              className="flex h-[34px] w-full items-center justify-between rounded-lg border border-sidebar-border bg-sidebar px-3 text-sm text-sidebar-foreground/60 shadow-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <span className="flex items-center gap-2"><Search className="size-4" /><span>Search</span></span>
-              <kbd className="h-5 rounded-[5px] border border-sidebar-border bg-sidebar px-1.5 font-mono text-[11px] leading-5">Ctrl K</kbd>
-            </button>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Learn</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {navigation.map((item) => {
-                const Icon = item.icon
-                return (
-                  <SidebarMenuItem key={item.route}>
-                    <SidebarMenuButton
-                      render={<a href={`#${item.route}`} />}
-                      isActive={activeRoute === item.route}
-                      tooltip={item.label}
-                    >
-                      <Icon />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Library</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <NavigationItems items={libraryNavigation} activeRoute={activeRoute} />
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup>
-          <SidebarGroupLabel>Data</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <NavigationItems items={dataNavigation} activeRoute={activeRoute} />
-          </SidebarGroupContent>
-        </SidebarGroup>
-        <SidebarGroup className="mt-auto">
-          <SidebarGroupContent>
-            <a href="#environments" className="block rounded-lg p-3 text-xs text-sidebar-foreground/70 hover:bg-sidebar-accent">
-              <div className="flex items-center gap-2 font-medium text-sidebar-foreground">
-                <BookOpen className="size-3.5" />
-                Runtime ready
-              </div>
-              <p className="mt-1 leading-5">
-                Local practice workspace
-              </p>
-            </a>
-          </SidebarGroupContent>
-        </SidebarGroup>
-      </SidebarContent>
-      <SidebarFooter>
-        <div className="flex items-center gap-2 rounded-lg p-2 text-xs">
-          <span className="size-2 rounded-full bg-emerald-500" />
-          <div className="min-w-0">
-            <p className="truncate font-medium">SQL learner</p>
-            <p className="truncate text-sidebar-foreground/60">
-              Local workspace
-            </p>
-          </div>
+      <nav
+        aria-label="Main navigation"
+        className="flex h-full flex-col gap-5 px-3 py-3.5 text-sm text-foreground"
+      >
+        <a href="#home" className={cn("flex items-center gap-2.5 rounded-lg px-1.5 py-0.5", focusRing)}>
+          <span className="flex size-[30px] items-center justify-center rounded-lg bg-primary font-mono text-xs font-medium text-primary-foreground">
+            SJ
+          </span>
+          <span className="flex flex-col leading-[1.25]">
+            <span className="font-semibold">SQL Judge</span>
+            <span className="text-xs text-muted-foreground">Local workspace</span>
+          </span>
+        </a>
+        <button
+          type="button"
+          disabled
+          title="Command search is not available yet"
+          className="flex h-[34px] w-full items-center justify-between rounded-lg border border-input bg-card px-3 text-muted-foreground"
+        >
+          <span className="flex items-center gap-2">
+            <Search className="size-4" aria-hidden="true" />
+            Search
+          </span>
+          <kbd className="inline-flex h-5 items-center rounded-[5px] border bg-card px-[5px] font-mono text-[11px]">
+            Ctrl K
+          </kbd>
+        </button>
+        <div className="flex flex-col gap-[18px]">
+          {navigationGroups.map((group) => (
+            <div key={group.label} className="flex flex-col gap-0.5">
+              <div className="px-2.5 pb-1 text-xs font-medium text-muted-foreground">{group.label}</div>
+              {group.items.map((item) => (
+                <NavLink key={item.route} item={item} active={activeRoute === item.route || (item.route === "problems" && activeRoute === "solve")} />
+              ))}
+            </div>
+          ))}
         </div>
-      </SidebarFooter>
+        <div className="flex-1" />
+        <a
+          href="#environments"
+          className={cn("flex items-start gap-2.5 rounded-lg px-2.5 py-2 hover:bg-hover", focusRing)}
+        >
+          <span className={cn("mt-[7px] size-2 shrink-0 rounded-full", runtimeDots[indicator.tone])} aria-hidden="true" />
+          <span className="flex flex-col leading-[1.35]">
+            <span className="text-[13px] font-medium">{indicator.label}</span>
+            <span className="text-xs text-muted-foreground">{indicator.detail}</span>
+          </span>
+        </a>
+      </nav>
     </Sidebar>
   )
 }
 
-function NavigationItems({
-  items,
-  activeRoute,
-}: {
-  items: NavigationItem[]
-  activeRoute: AppRoute
-}) {
+function NavLink({ item, active }: { item: NavigationItem; active: boolean }) {
+  const Icon = item.icon
   return (
-    <SidebarMenu>
-      {items.map((item) => {
-        const Icon = item.icon
-        return (
-          <SidebarMenuItem key={item.route}>
-            <SidebarMenuButton
-              render={<a href={`#${item.route}`} />}
-              isActive={activeRoute === item.route}
-              tooltip={item.label}
-            >
-              <Icon />
-              <span>{item.label}</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        )
-      })}
-    </SidebarMenu>
+    <a
+      href={`#${item.route}`}
+      aria-current={active ? "page" : undefined}
+      className={cn(
+        "flex h-[34px] items-center gap-2.5 rounded-lg px-2.5 hover:bg-hover",
+        focusRing,
+        active && "bg-hover font-medium"
+      )}
+    >
+      <Icon className={cn("size-4 shrink-0", active ? "text-foreground" : "text-muted-foreground")} aria-hidden="true" />
+      {item.label}
+    </a>
   )
 }
