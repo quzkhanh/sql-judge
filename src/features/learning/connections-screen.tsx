@@ -52,9 +52,11 @@ import {
 import { readConnectionProfileError } from "@/lib/connection-errors"
 import { readExternalError } from "@/lib/external-errors"
 import { isReadOnlyVerified, readOnlyStatusLabel } from "@/lib/external-access"
+import { isTauri } from "@/lib/tauri"
 import {
   beginExplorerRequest,
   clearExplorerOutput,
+  isConnectionProfileEditorDisabled,
   isCurrentExplorerRequest,
   shouldApplyProfileLoad,
   type ExplorerRequest,
@@ -104,6 +106,7 @@ export function ConnectionsScreen() {
   const [connectionTestError, setConnectionTestError] = useState<string | null>(
     null
   )
+  const desktopAvailable = isTauri()
   const selectedProfileIdRef = useRef<string | null>(null)
   const explorerGenerationRef = useRef(0)
   const profileMutationGenerationRef = useRef(0)
@@ -327,6 +330,10 @@ export function ConnectionsScreen() {
     connectionTestBusy,
     connectionTestError,
     connectionInfo !== null
+  )
+  const profileEditorDisabled = isConnectionProfileEditorDisabled(
+    desktopAvailable,
+    busy
   )
 
   async function testExplorerConnection() {
@@ -623,6 +630,7 @@ export function ConnectionsScreen() {
                   setExplorerError(null)
                   setConnectionTestError(null)
                 }}
+                disabled={profileEditorDisabled}
               >
                 <Plus /> New
               </Button>
@@ -703,6 +711,15 @@ export function ConnectionsScreen() {
               <CardTitle className="text-base">Profile details</CardTitle>
             </CardHeader>
             <CardContent>
+              {!desktopAvailable ? (
+                <p
+                  className="mb-5 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
+                  role="status"
+                >
+                  Connection profiles can be added from the SQL Judge desktop
+                  app. Browser preview is read-only.
+                </p>
+              ) : null}
               <div className="mb-5 rounded-lg border bg-muted/20 p-3">
                 <Label htmlFor="connection-url">Import connection URL</Label>
                 <div className="mt-2 flex flex-col gap-2 sm:flex-row">
@@ -714,13 +731,13 @@ export function ConnectionsScreen() {
                     value={connectionUrl}
                     onChange={(event) => setConnectionUrl(event.target.value)}
                     placeholder="postgresql://user:password@host:5432/database"
-                    disabled={busy}
+                    disabled={profileEditorDisabled}
                   />
                   <Button
                     type="button"
                     variant="outline"
                     onClick={importConnectionUrl}
-                    disabled={busy || !connectionUrl.trim()}
+                    disabled={profileEditorDisabled || !connectionUrl.trim()}
                   >
                     Fill fields
                   </Button>
@@ -734,140 +751,142 @@ export function ConnectionsScreen() {
                 className="grid gap-4 sm:grid-cols-2"
                 onSubmit={(event) => void saveProfile(event)}
               >
-                <Field label="Profile ID" htmlFor="profile-id">
-                  <Input
-                    id="profile-id"
-                    required
-                    value={draft.profileId}
-                    onChange={(event) =>
-                      setDraft({ ...draft, profileId: event.target.value })
-                    }
-                  />
-                </Field>
-                <Field label="Display name" htmlFor="display-name">
-                  <Input
-                    id="display-name"
-                    required
-                    value={draft.displayName}
-                    onChange={(event) =>
-                      setDraft({ ...draft, displayName: event.target.value })
-                    }
-                  />
-                </Field>
-                <Field label="Engine" htmlFor="engine">
-                  <select
-                    id="engine"
-                    className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                    value={draft.engine}
-                    onChange={(event) =>
-                      (() => {
-                        const engine = event.target
-                          .value as SaveConnectionProfileRequest["engine"]
+                <fieldset className="contents" disabled={profileEditorDisabled}>
+                  <Field label="Profile ID" htmlFor="profile-id">
+                    <Input
+                      id="profile-id"
+                      required
+                      value={draft.profileId}
+                      onChange={(event) =>
+                        setDraft({ ...draft, profileId: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label="Display name" htmlFor="display-name">
+                    <Input
+                      id="display-name"
+                      required
+                      value={draft.displayName}
+                      onChange={(event) =>
+                        setDraft({ ...draft, displayName: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label="Engine" htmlFor="engine">
+                    <select
+                      id="engine"
+                      className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                      value={draft.engine}
+                      onChange={(event) =>
+                        (() => {
+                          const engine = event.target
+                            .value as SaveConnectionProfileRequest["engine"]
+                          setDraft({
+                            ...draft,
+                            engine,
+                            port: engine === "sqlserver" ? 1433 : 5432,
+                            tlsMode: normalizeTlsMode(engine, draft.tlsMode),
+                          })
+                          setQuery(SAMPLE_QUERIES[engine])
+                        })()
+                      }
+                    >
+                      <option value="postgresql">PostgreSQL</option>
+                      <option value="sqlserver">SQL Server</option>
+                    </select>
+                  </Field>
+                  <Field label="TLS policy" htmlFor="tls-mode">
+                    <select
+                      id="tls-mode"
+                      className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
+                      value={draft.tlsMode}
+                      onChange={(event) =>
                         setDraft({
                           ...draft,
-                          engine,
-                          port: engine === "sqlserver" ? 1433 : 5432,
-                          tlsMode: normalizeTlsMode(engine, draft.tlsMode),
+                          tlsMode: event.target
+                            .value as SaveConnectionProfileRequest["tlsMode"],
                         })
-                        setQuery(SAMPLE_QUERIES[engine])
-                      })()
-                    }
+                      }
+                    >
+                      {supportedTlsModes(draft.engine).map((mode) => (
+                        <option key={mode} value={mode}>
+                          {mode === "verify_full"
+                            ? "Verify full"
+                            : mode === "verify_ca"
+                              ? "Verify CA"
+                              : "Require TLS"}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                  <Field label="Host" htmlFor="host">
+                    <Input
+                      id="host"
+                      required
+                      value={draft.host}
+                      onChange={(event) =>
+                        setDraft({ ...draft, host: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label="Port" htmlFor="port">
+                    <Input
+                      id="port"
+                      required
+                      min={1}
+                      max={65535}
+                      type="number"
+                      value={draft.port}
+                      onChange={(event) =>
+                        setDraft({ ...draft, port: Number(event.target.value) })
+                      }
+                    />
+                  </Field>
+                  <Field label="Database" htmlFor="database">
+                    <Input
+                      id="database"
+                      required
+                      value={draft.database}
+                      onChange={(event) =>
+                        setDraft({ ...draft, database: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field label="Username" htmlFor="username">
+                    <Input
+                      id="username"
+                      required
+                      value={draft.username}
+                      onChange={(event) =>
+                        setDraft({ ...draft, username: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <Field
+                    label="Password or token (optional on update)"
+                    htmlFor="secret"
+                    className="sm:col-span-2"
                   >
-                    <option value="postgresql">PostgreSQL</option>
-                    <option value="sqlserver">SQL Server</option>
-                  </select>
-                </Field>
-                <Field label="TLS policy" htmlFor="tls-mode">
-                  <select
-                    id="tls-mode"
-                    className="h-8 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm"
-                    value={draft.tlsMode}
-                    onChange={(event) =>
-                      setDraft({
-                        ...draft,
-                        tlsMode: event.target
-                          .value as SaveConnectionProfileRequest["tlsMode"],
-                      })
-                    }
-                  >
-                    {supportedTlsModes(draft.engine).map((mode) => (
-                      <option key={mode} value={mode}>
-                        {mode === "verify_full"
-                          ? "Verify full"
-                          : mode === "verify_ca"
-                            ? "Verify CA"
-                            : "Require TLS"}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
-                <Field label="Host" htmlFor="host">
-                  <Input
-                    id="host"
-                    required
-                    value={draft.host}
-                    onChange={(event) =>
-                      setDraft({ ...draft, host: event.target.value })
-                    }
-                  />
-                </Field>
-                <Field label="Port" htmlFor="port">
-                  <Input
-                    id="port"
-                    required
-                    min={1}
-                    max={65535}
-                    type="number"
-                    value={draft.port}
-                    onChange={(event) =>
-                      setDraft({ ...draft, port: Number(event.target.value) })
-                    }
-                  />
-                </Field>
-                <Field label="Database" htmlFor="database">
-                  <Input
-                    id="database"
-                    required
-                    value={draft.database}
-                    onChange={(event) =>
-                      setDraft({ ...draft, database: event.target.value })
-                    }
-                  />
-                </Field>
-                <Field label="Username" htmlFor="username">
-                  <Input
-                    id="username"
-                    required
-                    value={draft.username}
-                    onChange={(event) =>
-                      setDraft({ ...draft, username: event.target.value })
-                    }
-                  />
-                </Field>
-                <Field
-                  label="Password or token (optional on update)"
-                  htmlFor="secret"
-                  className="sm:col-span-2"
-                >
-                  <Input
-                    id="secret"
-                    type="password"
-                    autoComplete="new-password"
-                    value={draft.secret ?? ""}
-                    onChange={(event) =>
-                      setDraft({ ...draft, secret: event.target.value })
-                    }
-                  />
-                </Field>
-                <div className="flex items-center justify-between gap-3 border-t pt-4 sm:col-span-2">
-                  <p className="text-xs text-muted-foreground">
-                    Secrets go directly to the native vault and are never backed
-                    up.
-                  </p>
-                  <Button type="submit" disabled={busy}>
-                    Save profile
-                  </Button>
-                </div>
+                    <Input
+                      id="secret"
+                      type="password"
+                      autoComplete="new-password"
+                      value={draft.secret ?? ""}
+                      onChange={(event) =>
+                        setDraft({ ...draft, secret: event.target.value })
+                      }
+                    />
+                  </Field>
+                  <div className="flex items-center justify-between gap-3 border-t pt-4 sm:col-span-2">
+                    <p className="text-xs text-muted-foreground">
+                      Secrets go directly to the native vault and are never
+                      backed up.
+                    </p>
+                    <Button type="submit" disabled={profileEditorDisabled}>
+                      Save profile
+                    </Button>
+                  </div>
+                </fieldset>
               </form>
             </CardContent>
           </Card>

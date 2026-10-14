@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test"
 import {
   beginExplorerRequest,
   clearExplorerOutput,
+  isConnectionProfileEditorDisabled,
   isCurrentExplorerRequest,
   shouldApplyProfileLoad,
 } from "./connections-state"
@@ -47,5 +48,13 @@ describe("connection profile load state", () => {
       stale: shouldApplyProfileLoad(0, 1),
       current: shouldApplyProfileLoad(1, 1),
     }).toEqual({ stale: false, current: true })
+  })
+
+  test("disables profile editing outside the desktop app or while busy", () => {
+    expect({
+      browser: isConnectionProfileEditorDisabled(false, false),
+      desktop: isConnectionProfileEditorDisabled(true, false),
+      busy: isConnectionProfileEditorDisabled(true, true),
+    }).toEqual({ browser: true, desktop: false, busy: true })
   })
 })

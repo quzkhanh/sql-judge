@@ -25,6 +25,13 @@ export function shouldApplyProfileLoad(
   return loadMutationGeneration === currentMutationGeneration
 }
 
+export function isConnectionProfileEditorDisabled(
+  desktopAvailable: boolean,
+  busy: boolean
+): boolean {
+  return !desktopAvailable || busy
+}
+
 export function clearExplorerOutput<
   T extends { metadata: unknown; queryResult: unknown },
 >(
