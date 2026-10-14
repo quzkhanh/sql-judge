@@ -17,7 +17,8 @@ import {
   pickPackSource,
   type InstalledPack,
 } from "@/lib/judge-api"
-import { readPackImportError } from "@/lib/pack-errors"
+import { isPackImportDisabled, readPackImportError } from "@/lib/pack-errors"
+import { isTauri } from "@/lib/tauri"
 import { catalogProblems, hasInstalledProblems } from "./catalog"
 import { learningLoadErrorMessage, learningLoadPhase } from "./load-state"
 
@@ -29,6 +30,8 @@ export function PacksScreen() {
   const [catalogLoading, setCatalogLoading] = useState(true)
   const [catalogError, setCatalogError] = useState<string | null>(null)
   const [catalogReloadToken, setCatalogReloadToken] = useState(0)
+  const desktopAvailable = isTauri()
+  const importDisabled = isPackImportDisabled(desktopAvailable, busy)
   const problems = catalogProblems(packs)
   const topics = new Set(problems.flatMap((problem) => problem.topics))
   const catalogPhase = learningLoadPhase(
@@ -156,17 +159,29 @@ export function PacksScreen() {
                 onChange={(event) => setSourcePath(event.target.value)}
                 placeholder="/path/to/pack.sqljudge.zip"
                 className="font-mono"
-                disabled={busy}
+                disabled={importDisabled}
               />
-              <Button onClick={() => void handleImport()} disabled={busy}>
+              <Button
+                onClick={() => void handleImport()}
+                disabled={importDisabled}
+              >
                 Import pack
               </Button>
             </div>
+            {!desktopAvailable ? (
+              <p
+                className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-sm text-amber-900 dark:text-amber-200"
+                role="status"
+              >
+                Pack import is available from the SQL Judge desktop app. Browser
+                preview is read-only.
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <Button
                 variant="outline"
                 onClick={() => void handlePick("archive")}
-                disabled={busy}
+                disabled={importDisabled}
               >
                 <FileArchive />
                 Choose archive
@@ -174,7 +189,7 @@ export function PacksScreen() {
               <Button
                 variant="outline"
                 onClick={() => void handlePick("directory")}
-                disabled={busy}
+                disabled={importDisabled}
               >
                 <FolderOpen />
                 Choose folder

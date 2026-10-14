@@ -16,6 +16,10 @@ const RUNTIME_START_ERROR = "Managed PostgreSQL runtime could not be started."
 const RUNTIME_START_GUIDANCE =
   "Managed PostgreSQL runtime could not be started. Install PostgreSQL tools (initdb and pg_ctl) and ensure they are available on PATH."
 
+export function isPackImportDisabled(desktopAvailable: boolean, busy: boolean) {
+  return !desktopAvailable || busy
+}
+
 export function readPackImportError(reason: unknown): string {
   const message = nativeMessage(reason)
   if (message === RUNTIME_START_ERROR) {
