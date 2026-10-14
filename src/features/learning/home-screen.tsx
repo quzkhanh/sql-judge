@@ -141,7 +141,7 @@ function UpNext({ problems, pack }: { problems: LearningProblem[]; pack?: Instal
     <Card className={`${homeCardClass} overflow-hidden`}>
       <CardHeader className="!flex flex-row items-center justify-between gap-3 border-b px-5 py-4">
         <CardTitle className="min-w-0 flex-1 truncate text-[15px]">Up next{pack ? ` in ${pack.title}` : ""}</CardTitle>
-        <Button className="h-8 shrink-0 gap-1.5 px-2.5" variant="outline" render={<a href="#practice" />}>View all</Button>
+        <Button className="h-8 shrink-0 gap-1.5 px-2.5" variant="outline" nativeButton={false} render={<a href="#problems" />}>View all</Button>
       </CardHeader>
       <CardContent className="p-0">
         {problems.length > 0 ? problems.map((problem) => (
