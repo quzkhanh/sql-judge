@@ -56,6 +56,7 @@ import {
   beginExplorerRequest,
   clearExplorerOutput,
   isCurrentExplorerRequest,
+  shouldApplyProfileLoad,
   type ExplorerRequest,
 } from "./connections-state"
 import { learningLoadErrorMessage, learningLoadPhase } from "./load-state"
@@ -105,6 +106,7 @@ export function ConnectionsScreen() {
   )
   const selectedProfileIdRef = useRef<string | null>(null)
   const explorerGenerationRef = useRef(0)
+  const profileMutationGenerationRef = useRef(0)
 
   function clearExplorerData() {
     const cleared = clearExplorerOutput({ metadata, queryResult })
@@ -139,15 +141,28 @@ export function ConnectionsScreen() {
 
   useEffect(() => {
     let active = true
+    const loadMutationGeneration = profileMutationGenerationRef.current
     void Promise.all([getManagedRuntimeStatus(), listConnectionProfiles()])
       .then(([runtime, connectionProfiles]) => {
-        if (active) {
+        if (
+          active &&
+          shouldApplyProfileLoad(
+            loadMutationGeneration,
+            profileMutationGenerationRef.current
+          )
+        ) {
           setStatus(runtime)
           setProfiles(connectionProfiles)
         }
       })
       .catch(() => {
-        if (active) {
+        if (
+          active &&
+          shouldApplyProfileLoad(
+            loadMutationGeneration,
+            profileMutationGenerationRef.current
+          )
+        ) {
           setStatus(null)
           setProfiles([])
           explorerGenerationRef.current += 1
@@ -194,6 +209,7 @@ export function ConnectionsScreen() {
         ...draft,
         secret: draft.secret?.trim() ? draft.secret : undefined,
       })
+      profileMutationGenerationRef.current += 1
       setProfiles((current) =>
         [
           ...current.filter((profile) => profile.profileId !== saved.profileId),
@@ -247,6 +263,7 @@ export function ConnectionsScreen() {
     setError(null)
     try {
       await deleteConnectionProfile(profile.profileId)
+      profileMutationGenerationRef.current += 1
       setProfiles((current) =>
         current.filter((item) => item.profileId !== profile.profileId)
       )

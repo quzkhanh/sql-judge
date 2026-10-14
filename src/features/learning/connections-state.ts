@@ -18,6 +18,13 @@ export function isCurrentExplorerRequest(
   return request.generation === generation && request.profileId === profileId
 }
 
+export function shouldApplyProfileLoad(
+  loadMutationGeneration: number,
+  currentMutationGeneration: number
+): boolean {
+  return loadMutationGeneration === currentMutationGeneration
+}
+
 export function clearExplorerOutput<
   T extends { metadata: unknown; queryResult: unknown },
 >(

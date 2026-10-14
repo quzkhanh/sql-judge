@@ -4,6 +4,7 @@ import {
   beginExplorerRequest,
   clearExplorerOutput,
   isCurrentExplorerRequest,
+  shouldApplyProfileLoad,
 } from "./connections-state"
 
 describe("external explorer output state", () => {
@@ -37,5 +38,14 @@ describe("external explorer output state", () => {
       staleProfile: false,
       current: true,
     })
+  })
+})
+
+describe("connection profile load state", () => {
+  test("rejects a load that started before a local profile mutation", () => {
+    expect({
+      stale: shouldApplyProfileLoad(0, 1),
+      current: shouldApplyProfileLoad(1, 1),
+    }).toEqual({ stale: false, current: true })
   })
 })
