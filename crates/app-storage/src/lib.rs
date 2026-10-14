@@ -32,6 +32,31 @@ pub struct SubmissionRecord {
     pub created_at: String,
     /// Exact problem ID inside the pack; `None` for submissions recorded before ADR-023.
     pub problem_id: Option<String>,
+    /// Whether this was a judged submission or a sample run (ADR-024).
+    pub mode: SubmissionMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubmissionMode {
+    Run,
+    Submit,
+}
+
+impl SubmissionMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Run => "run",
+            Self::Submit => "submit",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "run" => Some(Self::Run),
+            "submit" => Some(Self::Submit),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -69,6 +94,7 @@ pub struct SubmissionSummary {
     pub verdict: String,
     pub created_at: String,
     pub problem_id: Option<String>,
+    pub mode: SubmissionMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,6 +146,9 @@ pub struct BackupSubmission {
     pub created_at: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub problem_id: Option<String>,
+    /// Only `"run"` is written; absent means a submission (ADR-024).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
     pub tests: Vec<BackupTest>,
 }
 
@@ -838,6 +867,14 @@ fn migrate_submission_problem_column(connection: &Connection) -> Result<(), Stor
     if !columns.iter().any(|column| column == "problem_id") {
         connection.execute("ALTER TABLE submissions ADD COLUMN problem_id TEXT", [])?;
     }
+    // ADR-024: additive defaulted column; rows written before it are submissions.
+    if !columns.iter().any(|column| column == "mode") {
+        connection.execute(
+            "ALTER TABLE submissions ADD COLUMN mode TEXT NOT NULL DEFAULT 'submit'
+             CHECK (mode IN ('run', 'submit'))",
+            [],
+        )?;
+    }
     Ok(())
 }
 
@@ -889,8 +926,8 @@ impl HistoryStore {
         transaction.execute(
             "INSERT INTO submissions (
                  submission_id, pack_id, pack_version, pack_hash,
-                 engine_version, policy_version, verdict, created_at, problem_id
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 engine_version, policy_version, verdict, created_at, problem_id, mode
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 submission.submission_id,
                 submission.pack_id,
@@ -901,6 +938,7 @@ impl HistoryStore {
                 submission.verdict,
                 submission.created_at,
                 submission.problem_id,
+                submission.mode.as_str(),
             ],
         )?;
         for test in tests {
@@ -924,7 +962,7 @@ impl HistoryStore {
     pub fn list_submissions(&self) -> Result<Vec<SubmissionSummary>, StorageError> {
         let mut statement = self.connection.prepare(
             "SELECT submission_id, pack_id, pack_version, pack_hash,
-                    engine_version, policy_version, verdict, created_at, problem_id
+                    engine_version, policy_version, verdict, created_at, problem_id, mode
              FROM submissions ORDER BY created_at DESC, submission_id DESC",
         )?;
         let rows = statement.query_map([], |row| {
@@ -938,6 +976,7 @@ impl HistoryStore {
                 verdict: row.get(6)?,
                 created_at: row.get(7)?,
                 problem_id: row.get(8)?,
+                mode: read_mode(row.get(9)?)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -950,7 +989,7 @@ impl HistoryStore {
     {
         let mut statement = self.connection.prepare(
             "SELECT submission_id, pack_id, pack_version, pack_hash,
-                    engine_version, policy_version, verdict, created_at, problem_id
+                    engine_version, policy_version, verdict, created_at, problem_id, mode
              FROM submissions ORDER BY created_at DESC, submission_id DESC",
         )?;
         let rows = statement.query_map([], |row| {
@@ -964,6 +1003,7 @@ impl HistoryStore {
                 verdict: row.get(6)?,
                 created_at: row.get(7)?,
                 problem_id: row.get(8)?,
+                mode: read_mode(row.get(9)?)?,
             })
         })?;
         for row in rows {
@@ -1081,6 +1121,7 @@ pub fn export_backup(path: impl AsRef<Path>) -> Result<BackupSnapshot, StorageEr
             verdict: submission.verdict.clone(),
             created_at: submission.created_at.clone(),
             problem_id: submission.problem_id.clone(),
+            mode: (submission.mode == SubmissionMode::Run).then(|| "run".to_owned()),
             tests: Vec::new(),
         };
         let base_size = serialized_size(&base)?;
@@ -1132,6 +1173,7 @@ pub fn export_backup(path: impl AsRef<Path>) -> Result<BackupSnapshot, StorageEr
             verdict: base.verdict,
             created_at: base.created_at,
             problem_id: base.problem_id,
+            mode: base.mode,
             tests,
         });
         Ok(())
@@ -1193,6 +1235,11 @@ pub fn restore_backup(
             verdict: backup.verdict.clone(),
             created_at: backup.created_at.clone(),
             problem_id: backup.problem_id.clone(),
+            mode: match backup.mode.as_deref() {
+                None => SubmissionMode::Submit,
+                Some(mode) => SubmissionMode::parse(mode)
+                    .ok_or(StorageError::InvalidRecord("submission mode"))?,
+            },
         };
         validate_submission(&submission)?;
         if !submission_ids.insert(submission.submission_id.clone()) {
@@ -1284,8 +1331,8 @@ pub fn restore_backup(
         transaction.execute(
             "INSERT INTO submissions (
                  submission_id, pack_id, pack_version, pack_hash,
-                 engine_version, policy_version, verdict, created_at, problem_id
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 engine_version, policy_version, verdict, created_at, problem_id, mode
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
                 submission.submission_id,
                 submission.pack_id,
@@ -1296,6 +1343,7 @@ pub fn restore_backup(
                 submission.verdict,
                 submission.created_at,
                 submission.problem_id,
+                submission.mode.as_str(),
             ],
         )?;
         for test in tests {
@@ -1340,6 +1388,16 @@ fn validate_submission(submission: &SubmissionRecord) -> Result<(), StorageError
         return Err(StorageError::InvalidRecord("problem id"));
     }
     Ok(())
+}
+
+fn read_mode(value: String) -> rusqlite::Result<SubmissionMode> {
+    SubmissionMode::parse(&value).ok_or_else(|| {
+        rusqlite::Error::FromSqlConversionFailure(
+            9,
+            rusqlite::types::Type::Text,
+            "unknown submission mode".into(),
+        )
+    })
 }
 
 /// Same shape as `problem.schema.json` `id`: `^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$`, max 80 bytes.

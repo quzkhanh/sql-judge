@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 
-import { lastAttemptLabel, problemProgress, progressTotals, relativeTime, submittedAtMs, matchesStatus } from "./problem-progress"
+import { catalogKeyFor, historyProblemKey, lastAttemptLabel, problemProgress, progressTotals, relativeTime, resumeProblemId, submittedAtMs, matchesStatus } from "./problem-progress"
 
 const NOW = Date.parse("2026-10-14T12:00:00Z")
 const sub = (problemId, verdict, iso, extra = {}) => ({ packId: "hr", packVersion: "1.2.0", packHash: "d1", problemId, verdict, createdAt: iso, ...extra })
@@ -54,5 +54,35 @@ describe("problem progress", () => {
     expect(problems.filter((p) => matchesStatus(progress.get(p.id), "unattempted")).map((p) => p.id)).toEqual(["y"])
     expect(problems.filter((p) => matchesStatus(progress.get(p.id), "attempted")).map((p) => p.id)).toEqual(["z"])
     expect(problems.filter((p) => matchesStatus(progress.get(p.id), "all"))).toHaveLength(3)
+  })
+})
+
+describe("sample runs and resume", () => {
+  test("sample runs never mark a problem solved or attempted", () => {
+    const progress = problemProgress(
+      [sub("a", "Accepted", "2026-10-14T11:00:00Z", { mode: "run" }), sub("b", "WrongAnswer", "2026-10-14T10:00:00Z", { mode: "submit" })],
+      key
+    )
+    expect(progress.has("hr@1.2.0#d1:a")).toBe(false)
+    expect(progress.get("hr@1.2.0#d1:b").status).toBe("attempted")
+  })
+
+  test("builds catalog keys from history records", () => {
+    expect(catalogKeyFor("hr", "1.2.0", "d1", "a")).toBe("hr@1.2.0#d1:a")
+    expect(historyProblemKey(sub("a", "Accepted", "x"))).toBe("hr@1.2.0#d1:a")
+    expect(historyProblemKey(sub(null, "Accepted", "x"))).toBeNull()
+  })
+
+  test("resumes the most recently attempted unsolved problem", () => {
+    const progress = problemProgress(
+      [
+        sub("old", "WrongAnswer", "2026-10-10T00:00:00Z"),
+        sub("recent", "SyntaxError", "2026-10-13T00:00:00Z"),
+        sub("done", "Accepted", "2026-10-14T00:00:00Z"),
+      ],
+      key
+    )
+    expect(resumeProblemId(progress)).toBe("hr@1.2.0#d1:recent")
+    expect(resumeProblemId(new Map())).toBeNull()
   })
 })

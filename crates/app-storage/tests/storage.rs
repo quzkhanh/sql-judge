@@ -1,6 +1,6 @@
 use app_storage::{
     ConnectionProfile, EnvironmentStore, HistoryStore, RecoveryOperation, RecoveryRecord,
-    SubmissionRecord, TestRecord, export_backup, restore_backup,
+    SubmissionMode, SubmissionRecord, TestRecord, export_backup, restore_backup,
 };
 use environment_manager::{EnvironmentMode, EnvironmentRecord, EnvironmentState};
 use rusqlite::Connection;
@@ -16,6 +16,7 @@ fn record(id: &str) -> SubmissionRecord {
         verdict: "Accepted".to_owned(),
         created_at: "2026-10-12T00:00:00Z".to_owned(),
         problem_id: Some("above-average".to_owned()),
+        mode: SubmissionMode::Submit,
     }
 }
 
@@ -806,5 +807,113 @@ fn recovery_journal_survives_reopen_and_can_be_cleared() {
             .expect("list cleared records")
             .is_empty()
     );
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn submission_mode_column_migrates_history_with_problem_ids() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-history-mode-migration-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    let connection = Connection::open(&path).expect("open pre-mode database");
+    connection
+        .execute_batch(
+            "CREATE TABLE schema_version (version INTEGER PRIMARY KEY CHECK (version = 1));
+             INSERT INTO schema_version(version) VALUES (1);
+             CREATE TABLE submissions (
+                 submission_id TEXT PRIMARY KEY NOT NULL,
+                 pack_id TEXT NOT NULL,
+                 pack_version TEXT NOT NULL,
+                 pack_hash TEXT NOT NULL,
+                 engine_version TEXT NOT NULL,
+                 policy_version TEXT NOT NULL,
+                 verdict TEXT NOT NULL,
+                 created_at TEXT NOT NULL,
+                 problem_id TEXT
+             );
+             CREATE TABLE submission_tests (
+                 submission_id TEXT NOT NULL REFERENCES submissions(submission_id) ON DELETE CASCADE,
+                 test_id TEXT NOT NULL,
+                 verdict TEXT NOT NULL,
+                 elapsed_ms INTEGER NOT NULL CHECK (elapsed_ms >= 0),
+                 PRIMARY KEY (submission_id, test_id)
+             );
+             INSERT INTO submissions VALUES ('before-mode', 'hr-sql-101', '1.0.0', 'sha256:old',
+                 'postgresql-managed', 'policy-v1', 'Accepted', '2026-10-01T00:00:00Z', 'above-average');",
+        )
+        .expect("create pre-mode history schema");
+    drop(connection);
+
+    let mut history = HistoryStore::open(&path).expect("migrate history store");
+    let mut run = record("sample-run");
+    run.mode = SubmissionMode::Run;
+    history
+        .save_submission(&run, &[test_record("sample")])
+        .expect("save sample run");
+    let submissions = history.list_submissions().expect("list submissions");
+    let mode_of = |id: &str| {
+        submissions
+            .iter()
+            .find(|submission| submission.submission_id == id)
+            .expect("submission listed")
+            .mode
+    };
+    assert_eq!(mode_of("before-mode"), SubmissionMode::Submit);
+    assert_eq!(mode_of("sample-run"), SubmissionMode::Run);
+    drop(history);
+    assert!(HistoryStore::open(&path).is_ok(), "migration is idempotent");
+    let _ = std::fs::remove_file(path);
+}
+
+#[test]
+fn sample_run_mode_survives_backup_roundtrip_and_unknown_modes_fail_closed() {
+    let path = std::env::temp_dir().join(format!(
+        "sql-judge-backup-mode-{}.sqlite",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_file(&path);
+    {
+        let mut history = HistoryStore::open(&path).expect("open history");
+        let mut run = record("sample-run");
+        run.mode = SubmissionMode::Run;
+        history
+            .save_submission(&run, &[test_record("sample")])
+            .expect("save run");
+        history
+            .save_submission(&record("judged"), &[test_record("basic")])
+            .expect("save submission");
+    }
+    let snapshot = export_backup(&path).expect("export backup");
+    assert_eq!(snapshot.version, 2);
+    let mode_of = |id: &str| {
+        snapshot
+            .submissions
+            .iter()
+            .find(|submission| submission.submission_id == id)
+            .expect("submission exported")
+            .mode
+            .clone()
+    };
+    assert_eq!(mode_of("sample-run").as_deref(), Some("run"));
+    assert_eq!(mode_of("judged"), None, "submissions keep the v2 shape");
+
+    restore_backup(&path, &snapshot).expect("restore backup");
+    let history = HistoryStore::open(&path).expect("reopen history");
+    let restored = history.list_submissions().expect("list submissions");
+    assert_eq!(
+        restored
+            .iter()
+            .find(|submission| submission.submission_id == "sample-run")
+            .expect("run restored")
+            .mode,
+        SubmissionMode::Run
+    );
+    drop(history);
+
+    let mut forged = snapshot.clone();
+    forged.submissions[0].mode = Some("debug".to_owned());
+    assert!(restore_backup(&path, &forged).is_err());
     let _ = std::fs::remove_file(path);
 }

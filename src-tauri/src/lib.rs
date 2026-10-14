@@ -492,6 +492,16 @@ struct SubmissionHistorySummary {
     verdict: String,
     created_at: String,
     problem_id: Option<String>,
+    mode: String,
+    tests: Vec<SubmissionTestSummary>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SubmissionTestSummary {
+    test_id: String,
+    verdict: String,
+    elapsed_ms: u64,
 }
 
 fn load_environment_state(path: &Path) -> Result<ManagedEnvironmentState, String> {
@@ -2272,7 +2282,7 @@ fn judge_request(
     let verdict = verdict_name(report.verdict).to_owned();
     let (columns, rows) = preview_response(report.preview.as_ref());
     let test_results = judge_test_results(&problem, &report.tests);
-    if expected_mode == "submit" {
+    {
         let tests = report
             .tests
             .iter()
@@ -2292,6 +2302,11 @@ fn judge_request(
             verdict: verdict.clone(),
             created_at: created_at(),
             problem_id: Some(problem.id.clone()),
+            mode: if expected_mode == "submit" {
+                app_storage::SubmissionMode::Submit
+            } else {
+                app_storage::SubmissionMode::Run
+            },
         };
         if state.history.save_submission(&submission, &tests).is_err() {
             return JudgeRunResult {
@@ -2300,7 +2315,7 @@ fn judge_request(
                 columns: Vec::new(),
                 rows: Vec::new(),
                 duration_ms,
-                message: "Submission completed but history could not be saved.".to_owned(),
+                message: "Judge completed but history could not be saved.".to_owned(),
                 tests: Vec::new(),
             };
         }
@@ -2464,26 +2479,39 @@ fn list_submission_history_value(
     let state = state
         .lock()
         .map_err(|_| "Managed environment state is busy.".to_owned())?;
-    state
+    let records = state
         .history
         .list_submissions()
-        .map(|records| {
-            records
+        .map_err(|_| "Submission history could not be read.".to_owned())?;
+    records
+        .into_iter()
+        .map(|record| {
+            let tests = state
+                .history
+                .list_submission_tests(&record.submission_id)
+                .map_err(|_| "Submission history could not be read.".to_owned())?
                 .into_iter()
-                .map(|record| SubmissionHistorySummary {
-                    submission_id: record.submission_id,
-                    pack_id: record.pack_id,
-                    pack_version: record.pack_version,
-                    pack_hash: record.pack_hash,
-                    engine_version: record.engine_version,
-                    policy_version: record.policy_version,
-                    verdict: record.verdict,
-                    created_at: record.created_at,
-                    problem_id: record.problem_id,
+                .map(|test| SubmissionTestSummary {
+                    test_id: test.test_id,
+                    verdict: test.verdict,
+                    elapsed_ms: test.elapsed_ms,
                 })
-                .collect()
+                .collect();
+            Ok(SubmissionHistorySummary {
+                submission_id: record.submission_id,
+                pack_id: record.pack_id,
+                pack_version: record.pack_version,
+                pack_hash: record.pack_hash,
+                engine_version: record.engine_version,
+                policy_version: record.policy_version,
+                verdict: record.verdict,
+                created_at: record.created_at,
+                problem_id: record.problem_id,
+                mode: record.mode.as_str().to_owned(),
+                tests,
+            })
         })
-        .map_err(|_| "Submission history could not be read.".to_owned())
+        .collect()
 }
 
 #[tauri::command]
@@ -3842,10 +3870,19 @@ mod tests {
             .history
             .list_submissions()
             .expect("list submission history");
-        assert_eq!(history.len(), 1);
-        assert_eq!(history[0].pack_id, "hr-analytics");
-        assert_eq!(history[0].problem_id.as_deref(), Some("above-average"));
-        assert!(!history[0].pack_hash.is_empty());
+        assert_eq!(history.len(), 2, "the sample run and the submission");
+        assert_eq!(
+            history
+                .iter()
+                .filter(|record| record.mode == app_storage::SubmissionMode::Submit)
+                .count(),
+            1
+        );
+        for record in &history {
+            assert_eq!(record.pack_id, "hr-analytics");
+            assert_eq!(record.problem_id.as_deref(), Some("above-average"));
+            assert!(!record.pack_hash.is_empty());
+        }
         drop(state_guard);
         drop(state);
         let _ = std::fs::remove_dir_all(root);
@@ -3928,11 +3965,28 @@ mod tests {
         assert_eq!(forged.verdict.as_deref(), Some("PolicyViolation"));
         assert!(forged.tests.is_empty());
         let history = super::list_submission_history_value(&state).expect("history");
-        assert_eq!(history.len(), 1, "forged problem ids are never recorded");
+        assert_eq!(history.len(), 2, "forged problem ids are never recorded");
+        let mut modes = history
+            .iter()
+            .map(|record| (record.mode.as_str(), record.problem_id.as_deref()))
+            .collect::<Vec<_>>();
+        modes.sort_unstable();
         assert_eq!(
-            history[0].problem_id.as_deref(),
-            Some("second-highest-salary")
+            modes,
+            vec![
+                ("run", Some("second-highest-salary")),
+                ("submit", Some("second-highest-salary")),
+            ]
         );
+        let encoded = serde_json::to_value(&history).expect("encode history");
+        let submitted = encoded
+            .as_array()
+            .expect("history array")
+            .iter()
+            .find(|record| record["mode"] == "submit")
+            .expect("submission listed");
+        assert_eq!(submitted["tests"].as_array().expect("tests").len(), 4);
+        assert!(submitted["tests"][0]["elapsedMs"].is_u64());
         drop(state);
         let _ = std::fs::remove_dir_all(root);
     }
@@ -4057,6 +4111,7 @@ mod tests {
                         verdict: "Accepted".to_owned(),
                         created_at: "2026-10-12T00:00:00Z".to_owned(),
                         problem_id: Some("above-average".to_owned()),
+                        mode: app_storage::SubmissionMode::Submit,
                     },
                     &[app_storage::TestRecord {
                         test_id: "basic".to_owned(),
@@ -4149,6 +4204,7 @@ mod tests {
                         verdict: "Accepted".to_owned(),
                         created_at: "2026-10-12T00:00:00Z".to_owned(),
                         problem_id: Some("above-average".to_owned()),
+                        mode: app_storage::SubmissionMode::Submit,
                     },
                     &[app_storage::TestRecord {
                         test_id: "basic".to_owned(),
@@ -4419,6 +4475,7 @@ mod tests {
                     verdict: "Accepted".to_owned(),
                     created_at: "2026-10-12T00:00:00Z".to_owned(),
                     problem_id: Some("above-average".to_owned()),
+                    mode: app_storage::SubmissionMode::Submit,
                 },
                 &[],
             )

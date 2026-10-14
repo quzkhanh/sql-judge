@@ -23,6 +23,7 @@ import {
 } from "lucide-react"
 
 import { useResolvedTheme } from "@/hooks/use-resolved-theme"
+import { useAppSettings } from "@/lib/app-settings"
 import { cn } from "@/lib/utils"
 import type { JudgeRunResult, SubmissionHistorySummary } from "@/lib/judge-api"
 import type { LearningProblem, ProblemDifficulty } from "./catalog"
@@ -37,9 +38,8 @@ import {
   orderedColumns,
   resultSummary,
   rowOrderNote,
-  verdictPresentation,
-  type VerdictTone,
 } from "./solve-state"
+import { verdictPresentation, type VerdictTone } from "./verdict-display"
 import { statementBlocks } from "./statement-format"
 import type { sqlCompletionItems } from "./sql-completions"
 
@@ -176,6 +176,7 @@ export function SolveView(props: SolveViewProps) {
   const [now] = useState(() => Date.now())
   const [cursor, setCursor] = useState({ line: 1, column: 1 })
   const { dark, toggle } = useResolvedTheme()
+  const { editorFontSize } = useAppSettings()
   const completionItemsRef = useRef(props.completionItems)
   const runRef = useRef(props.onRun)
   const canJudgeRef = useRef(false)
@@ -587,8 +588,8 @@ export function SolveView(props: SolveViewProps) {
                   ariaLabel: `SQL solution for ${problem.title}`,
                   automaticLayout: true,
                   fontFamily: "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
-                  fontSize: 13.5,
-                  lineHeight: 23,
+                  fontSize: editorFontSize,
+                  lineHeight: Math.round(editorFontSize * 1.7),
                   lineNumbers: "on",
                   lineNumbersMinChars: 4,
                   lineDecorationsWidth: 16,
