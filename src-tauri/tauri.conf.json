@@ -5,7 +5,7 @@
   "identifier": "com.dungnv1.sql-judge",
   "build": {
     "beforeDevCommand": "bun run dev",
-    "devUrl": "http://localhost:3000",
+    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run build",
     "frontendDist": "../dist",
     "removeUnusedCommands": true
