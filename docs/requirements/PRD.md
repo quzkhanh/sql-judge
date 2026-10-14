@@ -12,7 +12,7 @@ Standalone desktop learning environment for developers studying PostgreSQL / T-S
 | `judge-core` | Typed results, multiset/ordered compare, verdict policy | none | P1 |
 | `db-postgres` | PostgreSQL metadata/query adapter + isolation | judge-core | P1 |
 | `env-manager` | Managed local env create/rebuild/reset/clone/delete | db-postgres, pack-contract | P1–P2 |
-| `desktop-shell` | Existing tauri-ui app, thin commands, editor screens | contracts and service adapters | P1–P3 |
+| `desktop-shell` | Design-led desktop shell, Home, problem workspace and thin commands | contracts and service adapters | P1–P3 |
 | `app-storage` | SQLite submission, progress, connection metadata | none | P2 |
 | `connections` | External PG/MSSQL provider configuration/probe/explorer | adapters, secrets | P3 |
 | `db-sqlserver` | SQL Server metadata/runner, dialect support | judge-core, connections | P3–P4 |
@@ -20,6 +20,8 @@ Standalone desktop learning environment for developers studying PostgreSQL / T-S
 | `release-runtime` | Managed DB runtime distribution/lifecycle | env-manager, desktop-shell | P4 |
 
 ## 3. User journeys
+**J0 (home):** open app -> Home is the default route -> inspect local runtime/setup state and next available problem -> navigate to Practice, Packs, Environments, History, Progress, Connections or Explorer.
+
 **J1 (learn):** open app -> select problem -> view statement/table schema/sample fixture -> type query -> Run on sample -> Submit -> result/verdict/diff -> next problem -> progress persisted.
 
 **J2 (import AI content):** AI generates one `.sqljudge.zip` containing `pack.json`, references and fixtures -> app shows validation report -> tests references in disposable managed PG database -> atomically installs immutable pack version -> optional provision of named workspace -> problems available without app restart.
@@ -51,12 +53,13 @@ Standalone desktop learning environment for developers studying PostgreSQL / T-S
 | REQ-016 | MUST | App works without cloud; if managed PG runtime is not bundled in a given phase/platform, startup shows install requirement. |
 | REQ-017 | MUST | Manage cancel, timeout, cleanup, crash recovery and connection failures with no false WrongAnswer. |
 | REQ-018 | MUST | Structured logs devoid of secrets, minimal telemetry (off by default); friendly diagnostics. |
-| REQ-019 | MUST | Keyboard-accessible resizable three-pane desktop UI, dark/light modes through existing tauri-ui provider. |
+| REQ-019 | MUST | Implement the application shell and every screen from the approved visual contract in `docs/design/SQL Judge — UI redesign.html` and its matching artboard. Home is the default route; shell navigation groups are Learn, Library and Data; desktop sidebar is 248px and header is 56px. Preserve keyboard access, dark/light modes through the existing provider, responsive behavior and all safety states. |
 | REQ-020 | SHOULD | Import/export backup of packs, settings (no secrets) and history; collision/version semantics. |
 | REQ-021 | SHOULD | Distinct dialect support and version metadata, `EXPLAIN` for local read-only practice. |
 | REQ-022 | LATER | Scoped external writable sandbox only by explicit advanced opt-in + verification. |
 | REQ-023 | LATER | Bundled managed PostgreSQL per OS release asset with startup/shutdown/update mechanics. |
 | REQ-024 | LATER | SQL Server judge for disposable managed SQL Server test environments. |
+| REQ-025 | MUST | UI implementation must reproduce the matching artboard's declared tokens, layout, typography, spacing, radii, borders, shadows, interaction states and empty/loading/error states through the existing React component system. Exported HTML and vendor runtime are reference material only. |
 
 ## 5. Nonfunctional requirements / target budgets (validate on target machines)
 | ID | Objective | Verification |
@@ -71,6 +74,7 @@ Standalone desktop learning environment for developers studying PostgreSQL / T-S
 | NFR-008 | Frontend passes typecheck; Rust fmt/clippy/tests pass; UI manual keyboard review | CI & smoke testing |
 | NFR-009 | User DB never modified by read-only explorer or managed reset | External decoy DB test |
 | NFR-010 | Release builds documented and verified per selected platform; no assumed bundled PG | Matrix evidence |
+| NFR-011 | Screen fidelity is validated at each artboard viewport and supported responsive widths; no completion claim without rendered comparison evidence | Visual review artifact per route |
 
 ## 6. Explicitly excluded from initial MVP
 Full SQL syntax equivalence proof, cloud multi-user judge, tamper-proof hidden tests, arbitrary writable production databases, DB migration tool for user data, MySQL driver, DML/DDL problems, auto-generated AI hints requiring an Internet API, sync accounts, PL/pgSQL security proofs, full DB sidecar on day 1.

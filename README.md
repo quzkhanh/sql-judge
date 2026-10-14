@@ -1,59 +1,123 @@
-# SQL Judge — Agent Implementation Kit (v1.0)
+# SQL Judge
 
-**Purpose:** repository-ready requirements, architecture, executable package contracts, TDD gates, task plan, and operating rules for building a real offline-first SQL practice desktop application.
+SQL Judge is an offline-first desktop application for practicing SQL against validated problem packs and isolated local PostgreSQL fixtures. It combines an editor, schema context, bounded result previews, typed verdicts, submission history, managed environments, and read-only external database exploration.
 
-**Target:** existing `sql-judge` scaffold created via [`agmmnn/tauri-ui`](https://github.com/agmmnn/tauri-ui) (`Vite`, `shadcn/ui` preset `b0`, starter dashboard, size optimization, invoke example, release workflow; GitHub Release artifacts: NSIS, Portable, Apple Silicon DMG, Intel DMG, AppImage, DEB). **Preserve that scaffold**. Do not re-scaffold, change UI library, replace Bun with pnpm, or rewrite the generated release workflow without inspecting actual repository files. Tauri 2 + Rust + React/TypeScript + Bun.
+> Status: active development. The app is designed for local learning workflows, not for tamper-proof remote examination or production database administration.
 
-## Files and reading order
+## Product goals
 
-1. `AGENTS.md` — primary mandatory agent instructions (also `CLAUDE.md`).
-2. `docs/requirements/PRD.md` — scope, user journeys, requirements, acceptance IDs.
-3. `docs/requirements/ACCEPTANCE.md` — testable acceptance matrix and Definition of Done.
-4. `docs/architecture/ARCHITECTURE.md` — dependency diagram, crate boundaries, domain model, data flow.
-5. `docs/contracts/JUDGE-CONTRACT.md` — judging semantics, comparison, timeouts, errors.
-6. `docs/contracts/PROBLEM-PACK.md` — package layout and machine-readable manifest.
-7. `docs/contracts/CONNECTIONS-ENVIRONMENTS.md` — user database connections; safe provisioning/reset.
-8. `docs/security/THREAT-MODEL.md` — trust boundaries and forbidden actions.
-9. `docs/testing/TDD-RULES.md` — Red/Green/Refactor and verification requirements.
-10. `docs/ui/UI-SPEC.md` — use the actual tauri-ui starter, UX and accessibility.
-11. `docs/design/` — approved application design exports. `docs/design/SQL Judge — UI redesign.html` is the application-wide reference; per-screen artboards such as `docs/design/Home/Main.dc.html` provide exact layout and visual values.
-12. `docs/agents/AI-PACK-GENERATION.md` — RULE for agents that author SQL packs.
-13. `docs/agents/WORKFLOW.md` — task assignment, commits, evidence and handoffs.
-14. `tasks/plan.md` + `tasks/todo.md` — dependency-ordered implementation work.
-15. `docs/operations/BUILD-RELEASE.md` + `docs/operations/RUNBOOK.md` — build and runtime.
-16. `schemas/` and `examples/packs/` — machine-readable v1 contract and reference fixture.
+- Practice PostgreSQL SQL with pack-owned schema, public samples, and hidden tests.
+- Keep judging deterministic: each submission runs in a clean, constrained fixture context.
+- Keep secrets local: credentials do not enter frontend storage, SQLite, logs, backups, or commits.
+- Make external database access explorer-only and read-only by default.
+- Provide explicit, ownership-verified lifecycle actions for managed environments only.
 
-## UI design fidelity
+## Interface preview
 
-When changing frontend UI, treat the matching export under `docs/design/` as a binding visual reference, not inspiration. Recreate its documented dimensions, spacing, colors, typography, radii, borders, shadows, states, and responsive behavior through the existing component system. Do not copy exported runtime markup or vendor assets into production.
+The previews below are generated from the approved design artboards in `docs/design/`. They are visual reference material, not shipped runtime markup.
 
-If the reference and existing component defaults differ, use the reference values in a scoped component or deliberately update the shared primitive after checking its callers. Do not substitute arbitrary values or claim pixel fidelity without inspecting the relevant reference and validating the rendered screen.
+| Home | Problems |
+| --- | --- |
+| ![Home design](docs/design/previews/home.png) | ![Problems design](docs/design/previews/problems.png) |
+| Solve | Managed environments |
+| ![Solve design](docs/design/previews/solve.png) | ![Environments design](docs/design/previews/environments.png) |
 
-## How to merge into an already generated scaffold
+## Features
 
-From the **parent folder** of the existing `sql-judge` directory, unzip `sql-judge-agent-kit.zip` into a temporary directory; copy the kit's top-level `AGENTS.md`, `CLAUDE.md`, `docs/`, `tasks/`, `schemas/`, `examples/`, and `scripts/` into the project. Review conflicts **before** copying; do not overwrite an existing agent instruction or unfinished plan. The ZIP contains documentation/validators and examples, **not a Tauri application**.
+- Validated ZIP and directory problem-pack import with bounded metadata and immutable digest identity.
+- Monaco SQL editor with local schema-aware completion, Run, Submit, cancellation, result limits, and typed verdicts.
+- Disposable PostgreSQL fixture runner with constrained roles, time/row/result-byte limits, rollback cleanup, and safe error mapping.
+- Managed environment creation, clone, inspect, reset, delete, ownership markers, durable recovery, and explicit destructive confirmation.
+- Submission history, progress, and metadata-only backup/restore with exact pack identity validation.
+- PostgreSQL and SQL Server Explorer flows that enforce read-only access and TLS-safe policies.
+
+## Architecture
+
+| Area | Responsibility |
+| --- | --- |
+| `crates/judge-core` | Pure SQL judging contracts, comparison policy, and verdict aggregation. |
+| `crates/judge-postgres` | PostgreSQL runners, fixture isolation, result decoding, and local runtime control. |
+| `crates/problem-pack` | Pack validation, immutable registry, and safe import lifecycle. |
+| `crates/environment-manager` | Managed-environment ownership and lifecycle policy. |
+| `src-tauri` | Thin typed command boundary, authorization, policy enforcement, and error mapping. |
+| `src/` | React desktop UI, local state, accessibility, and typed IPC clients. |
+
+Read `docs/architecture/ARCHITECTURE.md` and `docs/security/THREAT-MODEL.md` before changing boundary-crossing behavior.
+
+## Prerequisites
+
+- [Bun](https://bun.sh/) for the frontend toolchain.
+- Rust stable toolchain with Cargo.
+- Tauri 2 platform prerequisites for your operating system.
+- PostgreSQL binaries for local runtime and integration tests.
+
+SQL Server fixture tests are opt-in and require a configured Docker/TLS harness. They are not run by the default test suite.
+
+## Quick start
 
 ```bash
-# Run inside existing sql-judge project after copying the kit
-python3 -m pip install -r scripts/requirements.txt  # once, for validation only
-python3 -m unittest discover -s scripts -p "test_*.py" -v
-python3 scripts/validate_pack.py examples/packs/hr-sql-101
-bun install --frozen-lockfile  # only after reviewing actual Bun lockfile and dependencies
+bun install --frozen-lockfile
 bun run tauri dev
 ```
 
-The validation script checks structural contracts without executing SQL or launching a database. Integration testing of SQL correctness is a later gate and cannot be claimed from a successful structural validation.
+The app opens on Home. Import a validated pack from **Packs**, then open **Practice** to run or submit a SQL solution. The local runtime is explicit: never point it at a production database.
 
-## Default delivery phases
+## Development
 
-- **P0:** inspect scaffold; freeze contracts; package validator + example pack.
-- **P1:** managed PostgreSQL local, SQL Judge core and minimal editor-to-verdict vertical slice.
-- **P2:** environment lifecycle + import UX + submissions + SQLite history.
-- **P3:** external PostgreSQL explorer and Microsoft SQL Server read-only connector.
-- **P4:** optional scoped external practice / SQL Server judge, cross-platform bundled runtime packaging, polish.
+```bash
+# Frontend
+bun test
+bun run typecheck
+bun run lint
+bun run build
 
-Avoid promising offline external server connectivity: external connections depend on the server/network being reachable. The desktop app itself has no cloud service requirement.
+# Rust workspace and Tauri boundary
+cargo test --workspace
+cargo test --manifest-path src-tauri/Cargo.toml
 
-## Contract and source provenance
+# Disposable PostgreSQL harness
+bun run test:pg-harness
+```
 
-This is a **design/specification deliverable**, not an already built or verified application. Baseline design cites [Tauri 2 commands](https://v2.tauri.app/develop/calling-rust/), [tauri-ui scaffold CLI](https://github.com/agmmnn/tauri-ui/blob/master/packages/create-tauri-ui/README.md), [PostgreSQL documentation](https://www.postgresql.org/docs/current/), and [SQL Server permissions](https://learn.microsoft.com/en-us/sql/relational-databases/security/authentication-access/getting-started-with-database-engine-permissions). Agents must check actual installed dependency versions and official docs before implementation.
+Use `bun run tauri dev` for the desktop shell. Do not claim platform packaging support without running the matching artifact build and install smoke test.
+
+## Using problem packs
+
+Problem packs are untrusted input. The importer rejects traversal, links, malformed manifests, oversized archives, unsafe setup, and invalid metadata before publication. Pack-provided setup executes only in trusted ephemeral contexts; user SQL never executes with provisioner credentials.
+
+See `docs/contracts/PROBLEM-PACK.md` for the package contract and `examples/` for reference material.
+
+## Security model
+
+- User SQL executes under constrained runner identities with bounded resources.
+- External connections default to read-only Explorer mode. No implicit schema creation, reset, or deletion occurs on external servers.
+- Destructive managed lifecycle operations require a verified ownership marker, scoped resource identity, displayed impact, and explicit confirmation in both UI and Rust.
+- Secrets stay in the OS credential vault or in-memory session fallback. They must never be added to source control, logs, JSON, SQLite, or frontend storage.
+
+The complete policy is in `docs/security/THREAT-MODEL.md`.
+
+## Contributing
+
+1. Read `AGENTS.md`, `docs/requirements/PRD.md`, `docs/requirements/ACCEPTANCE.md`, and the relevant contract before editing.
+2. Check `git status`, current tasks in `tasks/todo.md`, and existing tests. Preserve unrelated work in a dirty tree.
+3. Follow Red, Green, Refactor. Add a meaningful failing test before behavior changes; run focused tests before broad verification.
+4. Preserve architecture boundaries: core policy remains pure, Tauri handlers remain thin, and database adapters remain capability-specific.
+5. Treat frontend artboards under `docs/design/` as visual contracts. Match their stated tokens and layout through React components; do not copy the exported HTML or vendor runtime.
+6. Run the affected test suites, formatting/lint, typecheck, and build. For database work, include integration and negative/security coverage.
+7. Document task evidence and limitations in `tasks/todo.md`. Never mark visual fidelity complete without a rendered comparison to the artboard.
+
+See `docs/agents/WORKFLOW.md` for task handoff and commit expectations.
+
+## Documentation map
+
+- Requirements and acceptance: `docs/requirements/`
+- Architecture and ADRs: `docs/architecture/`
+- Protocol and pack contracts: `docs/contracts/`
+- Security model: `docs/security/`
+- Testing rules: `docs/testing/`
+- Design system and screen artboards: `docs/design/`
+- Operations and release guidance: `docs/operations/`
+
+## License
+
+No license has been declared for this repository.

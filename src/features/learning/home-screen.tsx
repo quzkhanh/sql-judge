@@ -139,9 +139,9 @@ function ResumeCard({ problem, pack }: { problem?: LearningProblem; pack?: Insta
 function UpNext({ problems, pack }: { problems: LearningProblem[]; pack?: InstalledPack }) {
   return (
     <Card className={`${homeCardClass} overflow-hidden`}>
-      <CardHeader className="flex-row items-center justify-between border-b px-5 py-4">
-        <CardTitle className="text-[15px]">Up next{pack ? ` in ${pack.title}` : ""}</CardTitle>
-              <Button className="h-8 gap-1.5 px-2.5" variant="ghost" nativeButton={false} render={<a href="#problems" />}>View all</Button>
+      <CardHeader className="!flex flex-row items-center justify-between gap-3 border-b px-5 py-4">
+        <CardTitle className="min-w-0 flex-1 truncate text-[15px]">Up next{pack ? ` in ${pack.title}` : ""}</CardTitle>
+        <Button className="h-8 shrink-0 gap-1.5 px-2.5" variant="outline" render={<a href="#practice" />}>View all</Button>
       </CardHeader>
       <CardContent className="p-0">
         {problems.length > 0 ? problems.map((problem) => (

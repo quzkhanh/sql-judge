@@ -5,7 +5,7 @@
 - **Rust domain agent:** `judge-core` types/comparator/verdict and tests.
 - **DB integration agent:** managed PG harness, adapter, fixture/test runner; no external user DB.
 - **Safety agent:** threat reviews, negative tests, scoped ownership/reset and secret/TLS controls.
-- **Frontend agent:** preserve tauri-ui starter; feature view + typed IPC + UI tests.
+- **Frontend agent:** preserve tauri-ui starter; inspect the application design export and matching screen artboard before every UI edit; implement typed IPC, UI tests and rendered visual comparison.
 - **Content agent:** generates isolated problem folders from pack schema, never modifies shared pack/schema without coordinator review.
 - **QA/release agent:** verifies install, smoke flow and artifact matrix; never claims untested platform success.
 
@@ -18,12 +18,13 @@ Each ticket must contain:
 Task: TNN — short verb phrase
 Context: requirement/AC IDs and exact docs paths
 Scope: exact files / crate / feature
+Design: application export + exact screen artboard path, viewport and responsive widths to compare
 Acceptance: 1–3 observable assertions incl. one negative case
 RED: command to reproduce failing test
 GREEN: command to verify behavior
 Security: blast radius and credentials/runtime assumptions
 Dependencies: task IDs
-Done evidence: stdout/CI artifact, links/commit
+Done evidence: stdout/CI artifact, visual comparison evidence, links/commit
 ```
 Coordinator selects tasks from `tasks/todo.md` in dependency order; never blanket instruct "build whole app" without bounded stage gates.
 
@@ -35,6 +36,7 @@ Changed files:
 RED evidence (command + expected assertion failure):
 GREEN evidence (command + test counts):
 Lint/typecheck/build evidence:
+Visual comparison evidence (artboard + viewport + responsive widths):
 Security/regression notes:
 Risks/deferred checks:
 Next unblocked task:
@@ -52,4 +54,4 @@ Inspect pinned dependency manifests/lockfiles and original scaffold. For Tauri c
 - Do not block independent read-only UI work while DB harness is unavailable, but never claim end-to-end Judge finished.
 
 ## Review checklist
-One reviewer verifies AC trace, code boundaries, at least one negative test, real command results, no unsafe DB write paths, log secrecy, coverage/risk tradeoffs and preservation of generated scaffold. Coordinator accepts only verified task then updates task checklist.
+One reviewer verifies AC trace, code boundaries, at least one negative test, real command results, no unsafe DB write paths, log secrecy, coverage/risk tradeoffs, preservation of generated scaffold and visual comparison against the approved artboard for frontend changes. Coordinator accepts only verified task then updates task checklist.
